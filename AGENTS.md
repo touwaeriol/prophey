@@ -82,6 +82,7 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - 服务商列表合并 runtime 与 `models.json` 中的定义，尚无凭据或运行时未提供登录方式的条目也可编辑。`ProviderEditor.tsx` 保留未知字段（headers/compat/cost 等），保存失败时保留草稿；重复 ID 要从列表编辑。删除预置条目的配置称为“恢复预置配置”，不删除 SDK 目录和 OAuth 凭据。预置 ID 仍从 `modelsPath: null` 的独立 ModelRuntime 获取，不能用叠加后的目录判断。
 - OpenAI ChatGPT 订阅登录必须在 `runtime.login` 的 options 里传 `getDeviceId`（稳定的 UUID，保存在 Electron userData 的 `device-id` 文件），否则报 “Sign in with ChatGPT requires a device ID (UUID) for this installation”。
 - 两个 OpenAI 服务商是 pi 内置的：`openai`（ChatGPT 订阅 / API Key，标准模型）和 `openai-codex`（旧版 Codex 渠道，仅 ChatGPT Plus/Pro，模型较少）。设置页对两者有说明文案。
+- **ChatGPT 订阅的「剩余用量」只能借用 Codex 凭据**：OpenAI 把 “Sign in with ChatGPT”（token sharing）令牌限制在 `api.openai.com/v1/models` 与 `/v1/responses`——`chatgpt.com/backend-api/wham/usage` 返回 401 `no_matching_rule`，`/v1/responses/usage` 要 `api.responses.read` 权限（两者都实测过）。Codex 凭据带 ChatGPT 账号 id，能读**同一份**套餐窗口，所以 `src/main/chatgpt-usage.ts` 先试 pi `auth.json` 的 `openai-codex` 凭据、再试 Codex CLI 的 `~/.codex/auth.json`（`CODEX_HOME` 优先），请求带 `chatgpt-account-id` / `originator: codex_cli_rs`，主进程缓存 60 秒、登录/登出时 `invalidateChatGptUsage()`。解析与文案在 `src/shared/chatgpt-usage.ts`（`18000s → 5 小时`、`604800s → 7 天`，剩余 = `100 - used_percent`，百分比保留小数、展示时向下取整）。设置页只在 `openai` / `openai-codex` 且 `storedType === 'oauth'` 时显示这一行；查不到就写「需在 ChatGPT 设置中查看」并给 `chatgpt.com/settings/usage` 链接，**不要编造百分比**，也不要把这一行挂到 API Key 凭据上。验证：`node scripts/test-usage-row.cjs`（真实 Electron + 隔离 profile：本机有 `~/.codex/auth.json` 时校验数字，没有时校验回退文案，截图写到 `artifacts/usage/`）。
 
 ## Composer & images
 

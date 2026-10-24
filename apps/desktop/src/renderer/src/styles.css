@@ -2153,6 +2153,41 @@ button:disabled {
   line-height: 1.45;
 }
 
+/* ChatGPT plan windows under an OpenAI row: numbers from the Codex login, link to ChatGPT's page. */
+.provider-usage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 10.8px;
+  line-height: 1.45;
+}
+
+.provider-usage-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.provider-usage.muted .provider-usage-value {
+  color: var(--text-faint);
+}
+
+.provider-usage-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.provider-usage-link:hover {
+  color: var(--text);
+}
+
 /* Custom endpoint for a built-in provider: one row under the provider it belongs to. */
 .provider-base-url-tag {
   display: inline-flex;

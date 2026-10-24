@@ -1,4 +1,5 @@
 import type { EngineCapabilities, EngineCommand, EngineId } from "./engine";
+import type { ChatGptUsageResult } from "./chatgpt-usage";
 export interface PiModel {
   provider: string;
   id: string;
@@ -630,6 +631,8 @@ export interface PiBridge {
     baseUrl: string | null,
   ): Promise<{ ok: boolean; error?: string }>;
   listProviders(): Promise<ProviderInfo[]>;
+  /** ChatGPT plan windows (5 h / weekly) for the OpenAI cards; `force` skips the short cache. */
+  chatGptUsage(force?: boolean): Promise<ChatGptUsageResult>;
   startLogin(
     providerId: string,
     type: ProviderAuthType,

@@ -21,6 +21,7 @@ import { SessionStore, toSummary, type SessionRecord } from './session-store'
 import { generateSessionTitle, promptTitle } from './session-title'
 import { TranscriptStore } from './transcript-store'
 import * as providers from './providers'
+import { chatGptUsage, invalidateChatGptUsage } from './chatgpt-usage'
 import * as updates from './updates'
 import * as mcp from './mcp'
 import * as engines from './engines'
@@ -2155,6 +2156,9 @@ function registerIpc(): void {
 
   handle('providers:list', () => providers.listProviders())
 
+  // OpenAI does not expose plan usage to "Sign in with ChatGPT" credentials; see chatgpt-usage.ts.
+  handle('providers:chatgpt-usage', (_event, force?: boolean) => chatGptUsage({ force: force === true }))
+
   handle('ask:answer', (_event, id: string, answers: AskAnswer[]) => {
     bridge.answerAsk(id, Array.isArray(answers) ? answers : [])
   })
@@ -2615,6 +2619,7 @@ function registerIpc(): void {
         loginId,
         sendLoginMessage,
         () => {
+          invalidateChatGptUsage()
           void reloadPiConfig()
         },
         { deviceId: await getDeviceId() }
@@ -2636,6 +2641,7 @@ function registerIpc(): void {
   handle('providers:logout', async (_event, providerId: string) => {
     try {
       await providers.logoutProvider(providerId)
+      invalidateChatGptUsage()
       await reloadPiConfig()
       return { ok: true }
     } catch (error) {

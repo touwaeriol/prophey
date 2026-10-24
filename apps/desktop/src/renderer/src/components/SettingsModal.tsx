@@ -1,5 +1,11 @@
 import { engineLabel, type EngineId } from '@shared/engine'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  CHATGPT_USAGE_URL,
+  usageTooltip,
+  usageWindowsSummary,
+  type ChatGptUsageResult
+} from '@shared/chatgpt-usage'
 import type {
   AppSettings,
   AppUpdateSnapshot,
@@ -93,6 +99,50 @@ const PROVIDER_NOTES: Record<string, string> = {
   google: 'AI Studio（Gemini API）：generativelanguage.googleapis.com'
 }
 
+/**
+ * Providers whose OAuth login is a ChatGPT subscription. Only these rows can show plan usage, and
+ * only once a credential is stored — an API-key login has no subscription windows behind it.
+ */
+const CHATGPT_PLAN_PROVIDERS: readonly string[] = ['openai', 'openai-codex']
+
+function isChatGptPlanProvider(provider: ProviderInfo): boolean {
+  return CHATGPT_PLAN_PROVIDERS.includes(provider.id) && provider.storedType === 'oauth'
+}
+
+/**
+ * Remaining ChatGPT plan usage for one provider row.
+ *
+ * OpenAI does not hand plan balances to "Sign in with ChatGPT" credentials, so when no Codex login
+ * backs the number the row says so and offers the link ChatGPT's own UI/UX guidance asks for —
+ * never a made-up percentage.
+ */
+function ProviderUsageLine({
+  result,
+  loading,
+  onManage
+}: {
+  result?: ChatGptUsageResult
+  loading: boolean
+  onManage: () => void
+}) {
+  const usage = result?.usage
+  const summary =
+    usage && usage.windows.length > 0 ? usageWindowsSummary(usage) : undefined
+  const title = usage
+    ? usageTooltip(usage)
+    : (result?.reason ?? '正在向 OpenAI 查询 ChatGPT 订阅用量…')
+  return (
+    <div className={`provider-usage ${summary ? '' : 'muted'}`} title={title}>
+      <span className="provider-usage-value">
+        {loading ? '正在查询剩余用量…' : (summary ?? '需在 ChatGPT 设置中查看')}
+      </span>
+      <button className="provider-usage-link" onClick={onManage} title={CHATGPT_USAGE_URL}>
+        查看用量
+      </button>
+    </div>
+  )
+}
+
 export function SettingsModal({
   open,
   initialTab,
@@ -165,6 +215,9 @@ export function SettingsModal({
   }, [open])
   const [providers, setProviders] = useState<ProviderInfo[]>([])
   const [providersLoading, setProvidersLoading] = useState(false)
+  /** ChatGPT plan windows behind the OpenAI rows; `undefined` until the first answer arrives. */
+  const [usage, setUsage] = useState<ChatGptUsageResult>()
+  const [usageLoading, setUsageLoading] = useState(false)
   const [query, setQuery] = useState('')
   const [loadError, setLoadError] = useState<string>()
   const [login, setLogin] = useState<LoginState>()
@@ -224,6 +277,17 @@ export function SettingsModal({
       setLoadError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setProvidersLoading(false)
+    }
+  }, [])
+
+  const loadUsage = useCallback(async (force = false) => {
+    setUsageLoading(true)
+    try {
+      setUsage(await window.pi.chatGptUsage(force))
+    } catch (cause) {
+      setUsage({ reason: cause instanceof Error ? cause.message : String(cause) })
+    } finally {
+      setUsageLoading(false)
     }
   }, [])
 
@@ -336,6 +400,21 @@ export function SettingsModal({
     if (!open) return
     return window.pi.onMcpState((state) => setWebSearch(state.web))
   }, [open])
+
+  // Only a stored ChatGPT-subscription credential has plan windows, so otherwise skip the request.
+  const chatGptProviderKey = useMemo(
+    () =>
+      providers
+        .filter(isChatGptPlanProvider)
+        .map((provider) => provider.id)
+        .sort()
+        .join(','),
+    [providers]
+  )
+  useEffect(() => {
+    if (!open || !chatGptProviderKey) return
+    void loadUsage()
+  }, [open, chatGptProviderKey, loadUsage])
 
   const toggleProviderWebSearch = useCallback(async (provider: ProviderInfo, enabled: boolean) => {
     setWebBusy(true)
@@ -751,7 +830,14 @@ export function SettingsModal({
                 <button className="ghost" onClick={() => void openProviderEditor('json')}>
                   高级 JSON
                 </button>
-                <button className="icon-btn" title="刷新" onClick={() => void loadProviders()}>
+                <button
+                  className="icon-btn"
+                  title="刷新"
+                  onClick={() => {
+                    void loadProviders()
+                    if (chatGptProviderKey) void loadUsage(true)
+                  }}
+                >
                   <RefreshIcon size={14} />
                 </button>
                 <span className="providers-count">
@@ -791,6 +877,13 @@ export function SettingsModal({
                       </div>
                       {PROVIDER_NOTES[provider.id] && (
                         <div className="provider-note">{PROVIDER_NOTES[provider.id]}</div>
+                      )}
+                      {isChatGptPlanProvider(provider) && (
+                        <ProviderUsageLine
+                          result={usage}
+                          loading={usageLoading}
+                          onManage={() => void window.pi.openExternal(CHATGPT_USAGE_URL)}
+                        />
                       )}
                     </div>
                     <div className="provider-actions">
