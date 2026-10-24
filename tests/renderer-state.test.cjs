@@ -129,6 +129,88 @@ test('renderer: legacy single-directory projects stay under sessions and Windows
   assert.equal(groups[0].rootCount, undefined)
   assert.equal(groups[0].sessions.length, 2)
 })
+const plainSession = (id, cwd, created, updated) => ({
+  id, path: id, title: id, cwd, createdAt: created, updatedAt: updated
+})
+function plainOptions(sessions, prefs = {}) {
+  return {
+    sessions, pinned: [], archived: new Set(), projectStatus: {}, projectQueries: {}, cwd: 'C:/alpha',
+    prefs: {
+      environment: 'all', group: 'folder', sort: 'activity', showEmptyGroups: false, onlyActiveProject: false,
+      ...prefs
+    }
+  }
+}
+
+test('renderer: switching sessions never reorders directories', () => {
+  const sessions = [
+    plainSession('a1', 'C:/alpha', 100, 900),
+    plainSession('b1', 'C:/beta', 300, 800),
+    plainSession('c1', 'C:/gamma', 200, 700)
+  ]
+  const before = buildSessionGroups(plainOptions(sessions)).map((group) => group.key)
+  // Newest directory first: the group order comes from `born` (oldest createdAt), not from activity.
+  assert.deepEqual(before, ['folder:c:/beta', 'folder:c:/gamma', 'folder:c:/alpha'])
+  // Opening a session touches updatedAt; the directory it lives in must keep its slot.
+  const touched = sessions.map((session) =>
+    session.id === 'a1' ? { ...session, updatedAt: 5_000 } : session
+  )
+  const after = buildSessionGroups({ ...plainOptions(touched), activePath: 'a1' }).map((group) => group.key)
+  assert.deepEqual(after, before)
+  // ...and the open session now leads its own group.
+  const group = buildSessionGroups({ ...plainOptions(touched), activePath: 'a1' })
+    .find((entry) => entry.key === 'folder:c:/alpha')
+  assert.deepEqual(group.sessions.map((session) => session.id), ['a1'])
+})
+
+test('renderer: the open session leads its directory, name sort keeps its own order', () => {
+  const sessions = [
+    plainSession('a1', 'C:/alpha', 100, 900),
+    plainSession('a2', 'C:/alpha', 110, 1000),
+    plainSession('a3', 'C:/alpha', 120, 800)
+  ]
+  const activity = buildSessionGroups({ ...plainOptions(sessions), activePath: 'a3' })[0]
+  assert.deepEqual(activity.sessions.map((session) => session.id), ['a3', 'a2', 'a1'])
+
+  const byName = buildSessionGroups({ ...plainOptions(sessions, { sort: 'name' }), activePath: 'a3' })[0]
+  assert.deepEqual(byName.sessions.map((session) => session.id), ['a1', 'a2', 'a3'])
+})
+
+test('renderer: a brand-new directory sorts in without shifting the others', () => {
+  const sessions = [
+    plainSession('a1', 'C:/alpha', 100, 900),
+    plainSession('b1', 'C:/beta', 300, 800)
+  ]
+  const before = buildSessionGroups(plainOptions(sessions)).map((group) => group.key)
+  assert.deepEqual(before, ['folder:c:/beta', 'folder:c:/alpha'])
+  const withNewDirectory = buildSessionGroups(
+    plainOptions([...sessions, plainSession('d1', 'C:/delta', 400, 400)])
+  ).map((group) => group.key)
+  assert.deepEqual(withNewDirectory, ['folder:c:/delta', ...before])
+  // A new session inside an existing directory does not move that directory either.
+  const withNewSession = buildSessionGroups(
+    plainOptions([...sessions, plainSession('a2', 'C:/alpha', 500, 500)])
+  ).map((group) => group.key)
+  assert.deepEqual(withNewSession, before)
+})
+
+test('renderer: pinning or archiving the oldest session does not make its directory look new', () => {
+  const sessions = [
+    plainSession('a1', 'C:/alpha', 100, 900),
+    plainSession('a2', 'C:/alpha', 110, 950),
+    plainSession('b1', 'C:/beta', 300, 800)
+  ]
+  const before = buildSessionGroups(plainOptions(sessions)).map((group) => group.key)
+  assert.deepEqual(before, ['folder:c:/beta', 'folder:c:/alpha'])
+
+  const pinned = buildSessionGroups({ ...plainOptions(sessions), pinned: ['a1'] })
+  assert.deepEqual(pinned.map((group) => group.key), before)
+  assert.deepEqual(pinned.find((group) => group.key === 'folder:c:/alpha').sessions.map((s) => s.id), ['a2'])
+
+  const archived = { ...plainOptions(sessions), archived: new Set(['a1']) }
+  assert.deepEqual(buildSessionGroups(archived).map((group) => group.key), before)
+})
+
 test('renderer: failed saves preserve draft, release busy and report result or transport error', async () => {
   for (const task of [async () => ({ ok: false, error: 'rejected' }), async () => { throw new Error('offline') }]) {
     let draft = 'unsaved configuration'

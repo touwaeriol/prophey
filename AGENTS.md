@@ -55,6 +55,7 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - 会话前进后退由 `App.tsx` 的 `historyRef`（stack + index，上限 50）驱动：`selectSession(session, { remember: false })` 用于历史跳转，避免再次入栈。
 - 置顶存在 localStorage `pi-pinned-sessions`（路径数组），会话悬停时的第一个 `.session-archive` 按钮是置顶、第二个是归档。**置顶的会话只在 `.pinned-block` 里出现，必须从项目分组里过滤掉**（`groups` 用 `visible = sessions.filter(!pinned)`）——否则同一个会话在两处重复，用户会以为有两条。
 - 侧栏：按 `session.cwd` 分项目，默认每个项目显示 10 条，超出显示“显示其余 N 个”；折叠/展开状态在 `Sidebar` 内部。项目标题右侧 `+` 通过 `pi:new-project-session` 切换 cwd 并开新会话。
+- **目录顺序不随切换会话变化**：分组排序键是 `SessionGroup.born`（该组**全部**会话里最早的 `createdAt`，置顶/归档的也算），不再是 `latest`（最近活动）。切会话会碰 `updatedAt`，但不会改变 `born`，所以目录永远不换位；只有真正多出一个目录（或它的第一条会话出现）才会按 `born` 降序插进来。`sort` 选「名称」时仍按 label。组内顺序：`最近活动` 模式下把当前打开的会话（`activePath`）提到组首，显式选了名称/创建时间则不移动。改这条规则要同步 `tests/renderer-state.test.cjs`（切换不换位 / 组内置顶 / 置顶或归档不改变 born / 新目录插入）与 `scripts/test-sidebar.cjs` 的真实切换检查。
 - **一个会话 = 一个 git 仓库**（单仓库会话模式；多仓库 project 是后面一层）。`src/main/repo.ts` 用 `git -C <dir> rev-parse --show-toplevel` 把目录归一化到仓库根，`pi:new-project-session` / `pi:choose-workspace` 都会先归一化，所以 `session.cwd` 就是仓库根、侧栏分组天然按仓库走。仓库信息（分支 / remote / 未提交数）5 秒缓存，`PiStatus.repo` 给输入框的 workspace chip 用，`pi:repos` 给侧栏每组头部的 `⎇ main 8` 徽标用；**不要在渲染层直接跑 git**。
 - 目录不是仓库时 `isRepo: false`，此时不显示分支徽标、行为退回“普通文件夹会话”，不要报错——用户可能就想在非仓库目录里跑。
 - `PiRpcClient` 的 `exit` / `error` 回调必须确认 `this.child === child` 再处理，否则重启时旧进程的退出事件会把新进程引用置空并误报“pi 进程已退出”。

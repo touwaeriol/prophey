@@ -24,6 +24,13 @@ export interface SessionGroup {
   total: number
   searching: boolean
   latest: number
+  /**
+   * Oldest `createdAt` in the group: when this directory/project first appeared here.
+   *
+   * Group order keys off this instead of `latest`, so switching sessions (which touches
+   * `updatedAt`) can never reorder the sidebar's directories — only a brand-new directory sorts in.
+   */
+  born: number
   order: number
 }
 
@@ -63,17 +70,44 @@ interface GroupOptions {
   cwd: string
   activeProject?: Project
   projects?: Project[]
+  /** Path of the session open in the window; promoted to the top of its own group. */
+  activePath?: string
 }
 
 /** View policy shared by every grouping mode, independent of DOM and persisted preferences. */
 export function buildSessionGroups({
-  sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd, activeProject, projects = []
+  sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd, activeProject, projects = [],
+  activePath
 }: GroupOptions): SessionGroup[] {
   const catalogue = new Map(projects.map(project => [project.id, project]))
   if (activeProject) catalogue.set(activeProject.id, activeProject)
   const pinnedPaths = new Set(pinned)
   const visible = sessions.filter(session => !pinnedPaths.has(session.path) &&
     (!prefs.onlyActiveProject || !activeProject || session.projectId === activeProject.id))
+  const isMultiRoot = (session: SessionSummary): boolean => {
+    const project = session.projectId ? catalogue.get(session.projectId) : undefined
+    return project ? project.roots.length > 1 : (session.additional?.length ?? 0) > 0
+  }
+  const rootsKey = (session: SessionSummary): string =>
+    'roots:' + [session.cwd, ...(session.additional ?? [])].map(pathKey).sort().join('|')
+  /**
+   * When each group first appeared, taken from *every* saved session (pinned and archived too).
+   *
+   * Pinning or archiving the oldest session of a directory must not make the directory look new and
+   * move it; only a directory that genuinely gains its first session sorts in.
+   */
+  const bornOf = new Map<string, number>()
+  const noteBorn = (key: string, session: SessionSummary): void => {
+    const createdAt = Number.isFinite(session.createdAt) ? session.createdAt : Number.POSITIVE_INFINITY
+    bornOf.set(key, Math.min(bornOf.get(key) ?? Number.POSITIVE_INFINITY, createdAt))
+  }
+  for (const session of sessions) {
+    if (isMultiRoot(session)) {
+      noteBorn('project:' + (session.projectId ?? rootsKey(session)), session)
+    } else if (prefs.group === 'folder') {
+      noteBorn('folder:' + pathKey(session.cwd), session)
+    }
+  }
   const applyView = (key: string, list: SessionSummary[]) => {
     const status = projectStatus[key] ?? 'active'
     const needle = (projectQueries[key] ?? '').trim().toLowerCase()
@@ -84,8 +118,22 @@ export function buildSessionGroups({
     })
     filtered.sort((a, b) => prefs.sort === 'name' ? a.title.localeCompare(b.title, 'zh-CN') :
       prefs.sort === 'created' ? b.createdAt - a.createdAt : b.updatedAt - a.updatedAt)
+    // The session in use leads its own directory under "最近活动"; explicit sorts keep their order.
+    // The directories themselves never move (see `born`/`groupOrder`).
+    const active = activePath && prefs.sort === 'activity'
+      ? filtered.findIndex(session => session.path === activePath)
+      : -1
+    if (active > 0) filtered.unshift(filtered.splice(active, 1)[0])
     return { sessions: filtered, total: list.length, searching: !!needle,
-      latest: list.reduce((max, session) => Math.max(max, session.updatedAt), 0) }
+      latest: list.reduce((max, session) => Math.max(max, session.updatedAt), 0),
+      born: bornOf.get(key) ?? Number.POSITIVE_INFINITY }
+  }
+  /** Sort groups by their own age, not by activity: a directory keeps its slot for good. */
+  const groupOrder = (a: SessionGroup, b: SessionGroup): number => {
+    if (prefs.sort === 'name') return a.label.localeCompare(b.label, 'zh-CN')
+    const left = Number.isFinite(a.born) ? a.born : Number.POSITIVE_INFINITY
+    const right = Number.isFinite(b.born) ? b.born : Number.POSITIVE_INFINITY
+    return right === left ? a.label.localeCompare(b.label, 'zh-CN') : right - left
   }
   // Ownership comes from the saved session, never from a directory shared by multiple projects.
   const projectBuckets = new Map<string, { project?: Project; list: SessionSummary[] }>()
@@ -96,10 +144,9 @@ export function buildSessionGroups({
   }
   const standalone: SessionSummary[] = []
   for (const session of visible) {
-    const project = session.projectId ? catalogue.get(session.projectId) : undefined
-    const multiRoot = project ? project.roots.length > 1 : (session.additional?.length ?? 0) > 0
-    if (multiRoot) {
-      const id = session.projectId ?? 'roots:' + [session.cwd, ...(session.additional ?? [])].map(pathKey).sort().join('|')
+    if (isMultiRoot(session)) {
+      const id = session.projectId ?? rootsKey(session)
+      const project = session.projectId ? catalogue.get(session.projectId) : undefined
       const bucket = projectBuckets.get(id) ?? { project, list: [] }
       bucket.list.push(session)
       projectBuckets.set(id, bucket)
@@ -112,7 +159,7 @@ export function buildSessionGroups({
       projectId: bucket.project?.id, rootCount: bucket.project?.roots.length ?? 1 + (bucket.list[0]?.additional?.length ?? 0),
       cwd: primary?.path ?? bucket.list[0]?.cwd, order: 0, ...applyView(key, bucket.list) }
   })
-  projectGroups.sort((a, b) => prefs.sort === 'name' ? a.label.localeCompare(b.label, 'zh-CN') : b.latest - a.latest)
+  projectGroups.sort(groupOrder)
 
   const buckets = new Map<string, { label: string; cwd?: string; order: number; list: SessionSummary[] }>()
   const add = (session: SessionSummary | undefined, directory: string) => {
@@ -131,7 +178,6 @@ export function buildSessionGroups({
   const ordinary: SessionGroup[] = [...buckets].map(([key, bucket]) => ({
     key, label: bucket.label, cwd: bucket.cwd, order: bucket.order, ...applyView(key, bucket.list)
   }))
-  ordinary.sort((a, b) => prefs.group === 'date' ? a.order - b.order :
-    prefs.sort === 'name' ? a.label.localeCompare(b.label, 'zh-CN') : b.latest - a.latest)
+  ordinary.sort((a, b) => prefs.group === 'date' ? a.order - b.order : groupOrder(a, b))
   return [...projectGroups, ...ordinary]
 }

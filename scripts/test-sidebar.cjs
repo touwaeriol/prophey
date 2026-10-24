@@ -129,6 +129,31 @@ if (!process.versions.electron) {
         }
         await evaluate('document.querySelector(".workspace-picker-search input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))')
         await until('!document.querySelector(".workspace-picker")')
+
+        // Switching sessions moves the open one to the front of its directory; directory order never moves.
+        const keysBefore = await evaluate('Array.from(document.querySelectorAll(".project-group"), g => g.dataset.groupKey)')
+        assert(keysBefore.length > 1, 'sidebar has several directory groups')
+        const fixture = JSON.parse(fs.readFileSync(path.join(temp, 'data', 'sessions.json'), 'utf8')).sessions
+        const pinnedTitles = await evaluate('Array.from(document.querySelectorAll(".pinned-item"), i => i.textContent.trim())')
+        const target = fixture.find((session) =>
+          session.engine === 'prophey' && !pinnedTitles.some((title) => title.includes(session.title)))
+        assert(target, 'an unpinned Prophey session exists to switch to')
+        assert.equal(
+          (await evaluate(`window.pi.switchSession(${JSON.stringify(target.path)})`)).ok,
+          true,
+          'switching to ' + target.title
+        )
+        await until(`(() => {
+          const active = document.querySelector('.project-group .session-item.active');
+          if (!active || !active.textContent.includes(${JSON.stringify(target.title)})) return false;
+          return active === active.closest('.project-group').querySelector('.session-item');
+        })()`, 'open session leads its directory')
+        assert.deepEqual(
+          await evaluate('Array.from(document.querySelectorAll(".project-group"), g => g.dataset.groupKey)'),
+          keysBefore,
+          'directory groups keep their order when switching'
+        )
+
         win.webContents.reload()
         await until('!!document.querySelector(".nav-row")')
         await evaluate('Array.from(document.querySelectorAll(".nav-row")).find(e => e.textContent === "新会话").click()')

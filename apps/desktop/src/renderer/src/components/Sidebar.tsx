@@ -311,9 +311,10 @@ export function Sidebar({
 
   const groups = useMemo(
     () => buildSessionGroups({
-      sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd: status.cwd, activeProject, projects
+      sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd: status.cwd, activeProject, projects,
+      activePath
     }),
-    [sessions, pinned, prefs, archived, projectStatus, projectQueries, status.cwd, activeProject, projects]
+    [sessions, pinned, prefs, archived, projectStatus, projectQueries, status.cwd, activeProject, projects, activePath]
   )
 
   useEffect(() => {
