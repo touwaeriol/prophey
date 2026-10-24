@@ -18,11 +18,10 @@ export function messagesBelong(
   payloadKey: string | undefined,
   expected: { sessionKey?: string; sessionFile?: string }
 ): boolean {
-  // Engines that cannot name their session keep the old behaviour: nothing to compare against.
-  if (!payloadKey) return true
+  if (!payloadKey) return !expected.sessionKey && !expected.sessionFile
   const wanted = [expected.sessionKey, expected.sessionFile]
     .filter((key): key is string => typeof key === 'string' && key !== '')
     .map(pathKey)
-  if (wanted.length === 0) return true
+  if (wanted.length === 0) return false
   return wanted.includes(pathKey(payloadKey))
 }

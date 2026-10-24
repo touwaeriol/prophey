@@ -1,5 +1,6 @@
 import type { DraftImage } from './images'
 import type { QueuedMessage } from './chat-types'
+import { pathKey } from './session-groups'
 
 /**
  * Composer state that belongs to one conversation.
@@ -24,7 +25,7 @@ export const LOCAL_COMPOSER_KEY = 'local'
 
 /** Stable key for a session's composer: the sidebar identity, which survives engine restarts. */
 export function composerKey(sessionPath?: string): string {
-  return sessionPath || LOCAL_COMPOSER_KEY
+  return sessionPath ? pathKey(sessionPath) : LOCAL_COMPOSER_KEY
 }
 
 export const EMPTY_COMPOSER: SessionComposer = { draft: '', images: [], queued: [] }
@@ -112,7 +113,7 @@ export function parseComposers(raw: string | null | undefined): SessionComposerM
         typeof (item as QueuedMessage).id === 'string' &&
         typeof (item as QueuedMessage).text === 'string'
     )
-    map[key] = {
+    map[composerKey(key)] = {
       draft: typeof entry.draft === 'string' ? entry.draft : '',
       images: Array.isArray(entry.images) ? (entry.images as DraftImage[]) : [],
       queued: queued.map((item) => ({ ...item, images: Array.isArray(item.images) ? item.images : [] })),

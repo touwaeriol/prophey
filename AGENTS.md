@@ -250,7 +250,7 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - 每个引擎有独立的 `EngineSlot`（`engineSlots` WeakMap）保存它的 status 镜像：全局 `status` 只属于当前屏幕上的引擎。后台引擎的 `onStatus` 只更新镜像 + 侧栏运行点（`statusSnapshot().runningSessionKeys` 遍历 `parkedEngines`）并调用 `rememberParkedSession()` 落 SessionStore；**不要**让它写 `activeSession` / `engineSessions`（那是当前会话的指针）。
 - `flushSubagentNotices()` 用 `engineForSession(parentSession)` 找会话对应的引擎，后台父会话也能收到子代理完成通知并自行继续；后台引擎的 `wake` 不受「用户刚点过停止」的限制。pi 没有 `notify()`，走桥事件时必须带 `session`，`desktop-mcp.js` 在 `session_start` 记住自己的 session file 后按 `sameSession()` 过滤——否则同时活着的两个 pi 进程会各自投递一遍。
 - 唯一的例外：忙碌但**还没有 session file** 的引擎（回合最开始的一瞬间）没法重新打开，仍走 `agent/switch-guard.ts` 的 `idleBeforeSwitch()` 停掉。`{ stop: true }` 参数保留兼容，但正常情况下不再使用。
-- **已知限制**：桌面 codegraph / warpgrep 网关（`gateway.configure`）按 key 全局唯一，新会话在**另一个仓库**启动时会把 `codegraph` / `warpgrep` 指到新仓库，后台引擎的代码搜索因此可能查到新仓库。同仓库会话不受影响（target 相同，网关复用）。要彻底解决需要按 workspace 给端点 key 加命名空间。
+- **网关与工具调用按引擎隔离**：每个 EngineSlot 注册独立桥接凭据；`gateway.configure(targets, credential)` 只管理该引擎的端点，切换仓库不会重定向后台引擎的 codegraph / warpgrep。工具名保持不变。提问、创建/查询子代理、完成通知和 web 模型选择都从调用方取会话、工作区和模型；不得从全局当前会话推断后台调用来源。dispose 时释放凭据与网关。
 - 验证：`tests/session-switch-smoke.cjs`（`npm run test:smoke`）在 `isStreaming: true` 状态下点仓库 `+`，断言不再出现 `ConfirmDialog` 且直接进入新会话；`tests/engine-contract.test.cjs` 仍覆盖 `idleBeforeSwitch` 的无 session file 兜底。
 
 ## Updates & packaging
@@ -375,6 +375,16 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - Prophey 的 workspace 工具目录和 shell 通过每次调用的 context 传递，禁止再写全局 AGENT_DESKTOP_ROOTS；多个子代理必须能同时操作各自的根。CLI MCP 仍支持环境变量入口。
 
 ## Prophey 后台命令
+
+- 0.6.2：概览的后台任务同时列出本会话的命令与子代理。命令点击读取最近 12KB 日志并每 2 秒刷新；子代理点击打开已有详情抽屉。「已完成」可展开当前引擎保留的命令及本会话子代理记录。命令日志详情/停止 IPC 必须校验调用方 sessionKey；不接受任意日志路径。命令元数据随引擎回收，日志文件保留。
+- 会话切换时，即使主回合已结束，只要后台命令或子代理仍在运行也必须 park 引擎，不能 dispose。
+
+## 0.6.2 会话隔离回归
+
+- 侧栏选中、输入框与消息队列统一从 `status.sessionKey ?? sessionFile` 派生；Windows key 归一大小写与斜杠。草稿 setter 捕获所属 key，Composer 按 key 重建，防止旧图片异步解码写入新会话。
+- `pi:event`、历史消息与统计响应都带会话身份；只有匹配当前会话的数据才绘制。发送传所属 key，主进程按 key 找原引擎；原引擎被回收时按 SessionRecord 的目录、模型、引擎在后台恢复。切换界面不拒绝有效发送，不把消息转给屏幕上的会话。队列每会话最多一个在途发送，失败只恢复原队列，不能再复制到草稿。
+- 提问按会话过滤，切走保留、返回继续回答；回答/取消/断开时按请求 id 移除。停止或重启只取消该会话的提问。子代理列表、运行 chip、详情入口按 parentSession 过滤；界面操作按不可混淆的任务 id 定位，命令日志按 sessionKey + task id 路由回原引擎。
+- 验证：`tests/session-isolation-smoke.cjs` 通过真实 Electron 验证跨会话草稿、延迟图片、队列、提问、事件和子代理；`tests/services.test.cjs` 验证两客户端提问/通知分流、网关共存及异步子代理启动归属。
 
 - 只有 Prophey 的 `run_bash` 接入 `agent/bash-tasks.ts`；pi、Claude Code、Codex 保持各自原生命令执行。Prophey 子代理复用这套自身能力，不启动 pi。
 - `run_in_background` 立即返回；普通命令默认等 1 秒（`yield_time_ms` 最多 10 秒），未结束则转后台。stdout/stderr 直接写 `userData/command-logs` 文件，不累积在内存或完整塞进 transcript。首次仅返回末尾 4000 bytes。

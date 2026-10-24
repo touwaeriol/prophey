@@ -7331,6 +7331,17 @@ button:disabled {
   font-size: 10.8px;
 }
 
+.panel-task-detail pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+}
+
 @media (max-width: 1080px) {
   .session-panel {
     flex-basis: 264px;

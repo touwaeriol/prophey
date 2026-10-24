@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import http from 'node:http'
+import type { EngineId } from '../shared/engine'
+import type { AgentWorkspace } from './agent/engine'
 import type {
   AskAnswer,
   AskQuestion,
@@ -14,15 +16,42 @@ const PORT_ATTEMPTS = 12
 
 interface PendingAsk {
   resolve: (result: AskResult) => void
+  request: AskRequest
 }
+
+export interface ClientContext {
+  sessionKey?: string
+  engine: EngineId
+  workspace: AgentWorkspace
+  model?: { provider: string; id: string }
+}
+const clients = new Map<string, () => ClientContext>()
+export function registerClient(context: () => ClientContext): string {
+  const credential = randomUUID()
+  clients.set(credential, context)
+  return credential
+}
+export function removeClient(credential: string): void { clients.delete(credential) }
+export function clientContext(credential: string): ClientContext | undefined { return clients.get(credential)?.() }
+function credentialOf(request: http.IncomingMessage): string {
+  return typeof request.headers.authorization === 'string'
+    ? request.headers.authorization.replace(/^Bearer\s+/i, '')
+    : String(request.headers['x-agent-desktop-token'] ?? '')
+}
+function contextOf(request: http.IncomingMessage): ClientContext | undefined {
+  return clients.get(credentialOf(request))?.()
+}
+export function pendingAsks(): AskRequest[] { return [...pending.values()].map(entry => entry.request) }
 
 let server: http.Server | null = null
 let port = 0
 let token = ''
 let askListener: ((request: AskRequest) => void) | null = null
+let askSettledListener: ((id: string) => void) | null = null
+export function setAskSettledListener(listener: (id: string) => void): void { askSettledListener = listener }
 let toolsListener: ((servers: Record<string, McpToolInfo[]>) => void) | null = null
 let mcpHandler:
-  | ((engine: string, message: Record<string, unknown>) => Promise<unknown | undefined>)
+  | ((engine: string, message: Record<string, unknown>, scope?: string) => Promise<unknown | undefined>)
   | null = null
 let apiHandler: ((request: ApiRequest) => Promise<ApiResponse>) | null = null
 const pending = new Map<string, PendingAsk>()
@@ -75,9 +104,11 @@ function pruneEvents(): void {
   while (eventQueue.length > 0 && now - eventQueue[0].ts > EVENT_MAX_AGE_MS) eventQueue.shift()
 }
 
-function takeEvents(): BridgeEvent[] {
+function takeEvents(session?: string): BridgeEvent[] {
   pruneEvents()
-  return eventQueue.splice(0)
+  const selected = eventQueue.filter(event => event.session === session)
+  for (const event of selected) eventQueue.splice(eventQueue.indexOf(event), 1)
+  return selected
 }
 
 /** Long-poll: returns as soon as an event exists, or with an empty list after `wait` ms. */
@@ -90,10 +121,11 @@ async function handleEvents(
     return
   }
   const parsed = new URL(request.url ?? '/', 'http://127.0.0.1')
+  const session = contextOf(request)?.sessionKey
   const requested = Number(parsed.searchParams.get('wait') ?? 20_000)
   const wait = Number.isFinite(requested) ? Math.min(Math.max(requested, 0), 60_000) : 20_000
   pruneEvents()
-  if (eventQueue.length === 0 && wait > 0) {
+  if (!eventQueue.some(event => event.session === session) && wait > 0) {
     await new Promise<void>((resolve) => {
       const done = (): void => {
         clearTimeout(timer)
@@ -106,7 +138,7 @@ async function handleEvents(
       response.once('close', done)
     })
   }
-  if (!response.destroyed) respond(response, 200, { events: takeEvents() })
+  if (!response.destroyed) respond(response, 200, { events: takeEvents(session) })
 }
 
 export function setAskListener(listener: ((request: AskRequest) => void) | null): void {
@@ -123,7 +155,7 @@ export function setToolsListener(
 /** MCP gateway endpoints (`/mcp/<engine>`), handled by the gateway module. */
 export function setMcpHandler(
   handler:
-    | ((engine: string, message: Record<string, unknown>) => Promise<unknown | undefined>)
+    | ((engine: string, message: Record<string, unknown>, scope?: string) => Promise<unknown | undefined>)
     | null
 ): void {
   mcpHandler = handler
@@ -133,6 +165,7 @@ export function answerAsk(id: string, answers: AskAnswer[]): void {
   const entry = pending.get(id)
   if (!entry) return
   pending.delete(id)
+  askSettledListener?.(id)
   entry.resolve({ answers })
 }
 
@@ -140,11 +173,14 @@ export function cancelAsk(id: string, reason?: string): void {
   const entry = pending.get(id)
   if (!entry) return
   pending.delete(id)
+  askSettledListener?.(id)
   entry.resolve({ cancelled: true, reason })
 }
 
-export function cancelAllAsks(reason: string): void {
-  for (const id of [...pending.keys()]) cancelAsk(id, reason)
+export function cancelAllAsks(reason: string, sessionKey?: string): void {
+  for (const [id, entry] of pending) {
+    if (!sessionKey || entry.request.sessionKey === sessionKey) cancelAsk(id, reason)
+  }
 }
 
 function normalizeQuestions(raw: unknown): AskQuestion[] {
@@ -184,10 +220,8 @@ function normalizeQuestions(raw: unknown): AskQuestion[] {
 }
 
 function isAuthorized(request: http.IncomingMessage): boolean {
-  const presented = typeof request.headers.authorization === 'string'
-    ? request.headers.authorization.replace(/^Bearer\s+/i, '')
-    : String(request.headers['x-agent-desktop-token'] ?? '')
-  return !token || presented === token
+  const presented = credentialOf(request)
+  return !token || presented === token || clients.has(presented)
 }
 
 async function readJsonBody(request: http.IncomingMessage, allowEmpty = false): Promise<Record<string, unknown>> {
@@ -226,12 +260,13 @@ function respond(response: http.ServerResponse, status: number, payload: unknown
 }
 
 /** Internal engine approvals use the same cancellable queue as desktop tools. */
-export function askEngine(questions: AskQuestion[], tool: string): Promise<AskResult> {
+export function askEngine(questions: AskQuestion[], tool: string, sessionKey?: string): Promise<AskResult> {
   if (!askListener) return Promise.resolve({ cancelled: true, reason: '窗口未就绪' })
   const id = randomUUID()
   return new Promise((resolve) => {
-    pending.set(id, { resolve })
-    askListener?.({ id, questions, tool, createdAt: Date.now() })
+    const request = { id, questions, tool, sessionKey, createdAt: Date.now() }
+    pending.set(id, { resolve, request })
+    askListener?.(request)
   })
 }
 
@@ -265,6 +300,7 @@ async function handleAsk(
 
   const id = randomUUID()
   const ask: AskRequest = {
+    sessionKey: contextOf(request)?.sessionKey,
     id,
     questions,
     createdAt: Date.now(),
@@ -275,7 +311,7 @@ async function handleAsk(
   const disconnected = (): void => cancelAsk(id, '请求已取消')
   response.once('close', disconnected)
   const result = await new Promise<AskResult>((resolve) => {
-    pending.set(id, { resolve })
+    pending.set(id, { resolve, request: ask })
     if (response.destroyed) disconnected()
     else askListener?.(ask)
   })
@@ -333,6 +369,7 @@ const MCP_ENDPOINT = /^\/mcp\/([A-Za-z0-9_-]+)$/
 const API_PREFIX = /^\/(agents|models|subagents)(\/.*)?$/
 
 export interface ApiRequest {
+  context?: ClientContext
   method: string
   path: string
   query: URLSearchParams
@@ -379,6 +416,7 @@ async function handleApi(
   }
   try {
     const result = await apiHandler({
+      context: contextOf(request),
       method: request.method ?? 'GET',
       path: parsed.pathname,
       query: parsed.searchParams,
@@ -422,7 +460,8 @@ async function handleMcp(
     return
   }
   try {
-    const result = await mcpHandler(engine, message)
+    const credential = credentialOf(request)
+    const result = await mcpHandler(engine, message, clients.has(credential) ? credential : undefined)
     if (result === undefined) {
       response.writeHead(202, { 'content-length': 0 })
       response.end()

@@ -228,8 +228,8 @@ test('renderer: a transcript that names another session is never accepted', () =
   // A session id and a path of the same session are both accepted via sessionKey/sessionFile.
   assert.equal(messagesBelong('s_a', { sessionKey: 's_a' }), true)
   // Engines without a session identity keep the old behaviour.
-  assert.equal(messagesBelong(undefined, owner), true)
-  assert.equal(messagesBelong('anything', {}), true)
+  assert.equal(messagesBelong(undefined, owner), false)
+  assert.equal(messagesBelong('anything', {}), false)
 })
 
 test('renderer: failed saves preserve draft, release busy and report result or transport error', async () => {

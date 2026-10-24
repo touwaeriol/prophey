@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { engineLabel } from '@shared/engine'
-import type { McpEngineState, McpServerInfo, McpState, PiStatus } from '@shared/types'
+import type { McpEngineState, McpServerInfo, McpState, PiStatus, SubagentView } from '@shared/types'
+import { isSubagentRunning } from '../lib/subagents'
+import { composerKey } from '../lib/session-composer'
 import type { ChatItem } from '../lib/messages'
 import { sessionOutputs } from '../lib/session-outputs'
 import {
@@ -92,6 +94,8 @@ export function SessionPanel({
   additional = [],
   mcp,
   items,
+  subagents,
+  onOpenSubagent,
   onClose,
   onOpenSettings,
   onNotice
@@ -101,6 +105,8 @@ export function SessionPanel({
   additional?: string[]
   mcp?: McpState
   items: ChatItem[]
+  subagents: SubagentView[]
+  onOpenSubagent: (id: string) => void
   onClose: () => void
   onOpenSettings: (tab: 'providers' | 'mcp' | 'general') => void
   onNotice: (text: string | null) => void
@@ -108,6 +114,22 @@ export function SessionPanel({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [showAllOutputs, setShowAllOutputs] = useState(false)
   const [busy, setBusy] = useState<string | undefined>(undefined)
+  const [selectedTask, setSelectedTask] = useState<string>()
+  const [taskOutput, setTaskOutput] = useState('')
+  const [showFinished, setShowFinished] = useState(false)
+  const owner = composerKey(status.sessionKey ?? status.sessionFile)
+  useEffect(() => {
+    if (!selectedTask) return
+    let cancelled = false
+    const read = async (): Promise<void> => {
+      const result = await window.pi.readBackgroundTask(selectedTask, owner).catch(error => ({ ok: false, error: String(error), text: undefined }))
+      if (!cancelled) setTaskOutput(result.ok ? result.text ?? '' : result.error ?? '读取失败')
+    }
+    setTaskOutput('正在读取…')
+    void read()
+    const timer = setInterval(() => void read(), 2000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [selectedTask, owner])
   /** Ticks while a background command runs so its elapsed time stays honest. */
   const [, setTick] = useState(0)
 
@@ -176,7 +198,7 @@ export function SessionPanel({
   const stopTask = async (id: string): Promise<void> => {
     setBusy(id)
     try {
-      const result = await window.pi.stopBackgroundTask(id)
+      const result = await window.pi.stopBackgroundTask(id, owner)
       if (!result.ok) onNotice(result.error ?? '停止失败')
     } catch (error) {
       onNotice(error instanceof Error ? error.message : String(error))
@@ -362,7 +384,7 @@ export function SessionPanel({
           {backgroundTasks.map((task) => (
             <div className="panel-row" key={task.id} title={task.command}>
               <span className="panel-dot running" aria-hidden="true" />
-              <span className="panel-row-main panel-row-ellipsis">{task.command}</span>
+              <button className="panel-link panel-row-main panel-row-ellipsis" title="查看命令输出" onClick={() => setSelectedTask(task.id)}>{task.command}</button>
               <span className="panel-row-state">{formatElapsed(Date.now() - task.startedAt)}</span>
               <button
                 className="panel-icon-btn"
@@ -374,10 +396,33 @@ export function SessionPanel({
               </button>
             </div>
           ))}
-          {backgroundTasks.length === 0 && <div className="panel-empty">没有正在运行的后台命令</div>}
-          {(status.backgroundFinished ?? 0) > 0 && (
-            <div className="panel-context-foot">{status.backgroundFinished} 个已完成</div>
+          {subagents.filter(isSubagentRunning).map(record => (
+            <button className="panel-row panel-row-button" key={record.id} onClick={() => onOpenSubagent(record.id)} title="查看子代理详情">
+              <span className="panel-dot running" />
+              <span className="panel-row-main">{record.label || record.agent || record.id}</span>
+              <span className="panel-row-state">子代理</span>
+            </button>
+          ))}
+          {backgroundTasks.length === 0 && !subagents.some(isSubagentRunning) && <div className="panel-empty">没有正在运行的后台任务</div>}
+          {((status.backgroundFinished ?? 0) + subagents.filter(record => !isSubagentRunning(record)).length) > 0 && (
+            <button className="panel-link" onClick={() => setShowFinished(value => !value)}>
+              {(status.backgroundFinished ?? 0) + subagents.filter(record => !isSubagentRunning(record)).length} 个已完成
+            </button>
           )}
+          {showFinished && (status.backgroundHistory ?? []).map(task => (
+            <button key={task.id} className="panel-row panel-row-button" onClick={() => setSelectedTask(task.id)}>
+              <span className="panel-row-main panel-row-ellipsis">{task.command}</span><span className="panel-row-state">{task.state === 'completed' ? '完成' : task.state === 'failed' ? '失败' : '停止'}</span>
+            </button>
+          ))}
+          {showFinished && subagents.filter(record => !isSubagentRunning(record)).map(record => (
+            <button key={record.id} className="panel-row panel-row-button" onClick={() => onOpenSubagent(record.id)}>
+              <span className="panel-row-main">{record.label || record.agent || record.id}</span><span className="panel-row-state">子代理</span>
+            </button>
+          ))}
+          {selectedTask && <div className="panel-task-detail">
+            <div className="panel-card-actions"><span>命令输出 · 最近 12KB</span><button className="panel-link" onClick={() => setSelectedTask(undefined)}>关闭</button></div>
+            <pre>{taskOutput}</pre>
+          </div>}
         </PanelCard>
       </div>
     </aside>

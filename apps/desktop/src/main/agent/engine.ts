@@ -104,6 +104,7 @@ export interface AgentEngine {
    * stop button when this exists and a plain list otherwise.
    */
   stopBackgroundTask?(id: string): Promise<{ ok: boolean; error?: string }>
+  readBackgroundTask?(id: string): Promise<{ ok: boolean; text?: string; error?: string }>
 
   /**
    * Start whatever background polling the engine needs.

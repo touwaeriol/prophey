@@ -73,22 +73,24 @@ if (!process.versions.electron) {
         await evaluate('document.querySelector(".tabbar .icon-btn[title^=\\"显示/隐藏会话概览\\"]").click()')
         await until('!!document.querySelector(".session-panel")', 'panel')
 
+        const owner = await evaluate('window.pi.getStatus().then(s => s.sessionKey ?? s.sessionFile)')
+        const emit = record => win.webContents.send('pi:event', { ...record, sessionKey: owner })
         // Seed a produced file and one running background task, the way the transcript does it.
-        win.webContents.send('pi:event', { type: 'message_start', message: { role: 'assistant' } })
-        win.webContents.send('pi:event', {
+        emit({ type: 'message_start', message: { role: 'assistant' } })
+        emit({
           type: 'tool_execution_start',
           toolCallId: 'proof-write',
           toolName: 'write_file',
           arguments: { path: 'src/proof.ts', content: 'export const proof = true' }
         })
-        win.webContents.send('pi:event', {
+        emit({
           type: 'tool_execution_end',
           toolCallId: 'proof-write',
           toolName: 'write_file',
           arguments: { path: 'src/proof.ts', content: 'export const proof = true' },
           result: 'ok'
         })
-        win.webContents.send('pi:event', {
+        emit({
           type: 'message_end',
           message: { role: 'assistant', content: [{ type: 'text', text: '写好了 src/proof.ts' }] }
         })

@@ -166,7 +166,8 @@ export class PropheyEngine implements AgentEngine {
       patch = {
         ...patch,
         backgroundTasks: commands?.active() ?? [],
-        backgroundFinished: commands?.finishedCount() ?? 0
+        backgroundFinished: commands?.finishedCount() ?? 0,
+        backgroundHistory: commands?.history() ?? []
       }
     }
     this.snapshot = { ...this.snapshot, ...patch }
@@ -188,6 +189,15 @@ export class PropheyEngine implements AgentEngine {
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
+  }
+
+  async readBackgroundTask(id: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+    try {
+      const commands = this.bashTasks.get(this.sessionId)
+      if (!commands) return { ok: false, error: '当前会话没有后台命令' }
+      const result = await commands.read({ task_id: id, tail: true, max_bytes: 12000 })
+      return { ok: true, text: result.content.map(block => block.text ?? '').join('\n') }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   }
 
   poll(): void {
@@ -540,7 +550,7 @@ ${text.trim()}`,
         notify: text => this.queueNotice(text, true, owner),
         onChange: tasks => {
           if (owner === this.sessionId) {
-            this.setStatus({ backgroundTasks: tasks, backgroundFinished: commands!.finishedCount() })
+            this.setStatus({ backgroundTasks: tasks, backgroundFinished: commands!.finishedCount(), backgroundHistory: commands!.history() })
           }
         }
       })

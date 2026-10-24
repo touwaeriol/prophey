@@ -35,6 +35,7 @@ export interface PiStatus {
   backgroundTasks?: Array<{ id: string; command: string; startedAt: number }>;
   /** Background commands of this session that already finished; the session panel counts them. */
   backgroundFinished?: number;
+  backgroundHistory?: Array<{ id: string; command: string; startedAt: number; state: string }>;
   /** A context transfer owns the engine; queued prompts and mutations must wait. */
   switchingEngine?: EngineId;
   engine?: EngineId;
@@ -131,6 +132,7 @@ export interface AgentMessage {
 }
 
 export interface SessionStats {
+  sessionKey?: string;
   tokens?: { input?: number; output?: number; total?: number };
   cost?: number;
   contextUsage?: {
@@ -340,6 +342,7 @@ export interface AskQuestion {
 }
 
 export interface AskRequest {
+  sessionKey?: string;
   id: string;
   questions: AskQuestion[];
   createdAt: number;
@@ -606,6 +609,7 @@ export interface PiBridge {
     message: string,
     streamingBehavior?: "steer" | "followUp",
     images?: PromptImage[],
+    sessionKey?: string,
   ): Promise<PromptResult>;
   abort(): Promise<void>;
   newSession(options?: SessionSwitchOptions): Promise<SwitchResult>;
@@ -613,7 +617,8 @@ export interface PiBridge {
   getMessages(): Promise<SessionMessages>;
   getSessionStats(): Promise<SessionStats>;
   /** Stop one background command (Prophey only; other engines report it as unsupported). */
-  stopBackgroundTask(id: string): Promise<{ ok: boolean; error?: string }>;
+  stopBackgroundTask(id: string, sessionKey?: string): Promise<{ ok: boolean; error?: string }>;
+  readBackgroundTask(id: string, sessionKey?: string): Promise<{ ok: boolean; text?: string; error?: string }>;
   /** Reveal a file the session produced in the OS file manager; must live in the session workspace. */
   revealPath(path: string): Promise<{ ok: boolean; error?: string }>;
   listSessions(): Promise<SessionSummary[]>;
@@ -737,7 +742,8 @@ export interface PiBridge {
   ): Promise<{ ok: boolean; error?: string }>;
   openMcpConfig(which: "user" | "project"): Promise<void>;
   onAskRequest(listener: (request: AskRequest) => void): () => void;
-  onAskCleared(listener: () => void): () => void;
+  listAsks(): Promise<AskRequest[]>;
+  onAskCleared(listener: (payload?: { sessionKey?: string; id?: string }) => void): () => void;
   answerQuestion(id: string, answers: AskAnswer[]): Promise<void>;
   cancelQuestion(id: string, reason?: string): Promise<void>;
   onEvent(listener: (record: Record<string, unknown>) => void): () => void;

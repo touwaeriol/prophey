@@ -10,7 +10,7 @@ const root = path.resolve(__dirname, '..')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'prophey-services-tests-'))
 const electron = path.join(temp, 'electron.cjs')
 fs.writeFileSync(electron, 'exports.shell = {}; exports.app = { getPath(){return ""}, getAppPath(){return ""} }')
-const sources = ['storage', 'session-store', 'transcript-store', 'projects', 'agents', 'mcp', 'providers', 'profile', 'bridge', 'web', 'sessions']
+const sources = ['storage', 'session-store', 'transcript-store', 'projects', 'agents', 'mcp', 'providers', 'profile', 'bridge', 'web', 'sessions', 'gateway', 'api']
 esbuild.buildSync({ stdin: { contents: sources.map((name, i) => `export * as m${i} from './${name}'`).join('\n'), resolveDir: path.join(root, 'apps/desktop/src/main'), loader: 'ts' }, outfile: path.join(temp, 'services.cjs'), bundle: true, platform: 'node', format: 'cjs', packages: 'external', alias: { electron } })
 const { m0: storage, m1: { SessionStore }, m2: { TranscriptStore }, m3: { ProjectStore }, m4: agents, m5: mcp, m6: providers, m7: profile, m8: bridge, m9: web } = require(path.join(temp, 'services.cjs'))
 after(() => { bridge.stopBridge(); fs.rmSync(temp, { recursive: true, force: true }) })
@@ -165,6 +165,59 @@ test('subagent tools forward MCP cancellation to the bridge transport', async ()
   const tool = subagentTools.find(t => t.name === 'list_subagents')
   await tool.call({}, { signal: controller.signal, request: async (_method, _path, _body, signal) => { forwarded = signal; return { ok: true, records: [] } } })
   assert.equal(forwarded, controller.signal)
+})
+
+test('bridge: questions and completion events belong to their calling engine', async () => {
+  const { url } = await bridge.startBridge({ token: 'test-secret' })
+  const a = bridge.registerClient(() => ({ sessionKey: 'A', engine: 'prophey', workspace: { primary: '/a', additional: [] } }))
+  const b = bridge.registerClient(() => ({ sessionKey: 'B', engine: 'prophey', workspace: { primary: '/b', additional: [] } }))
+  try {
+    bridge.setAskListener(() => {})
+    const ask = credential => fetch(url + '/ask', { method: 'POST', headers: { authorization: 'Bearer ' + credential }, body: JSON.stringify({ questions: [{ question: 'Continue?' }] }) }).then(r => r.json())
+    const first = ask(a), second = ask(b)
+    await eventually(() => bridge.pendingAsks().length === 2)
+    bridge.cancelAllAsks('stop A', 'A')
+    assert.equal((await first).cancelled, true)
+    assert.equal(bridge.pendingAsks()[0].sessionKey, 'B')
+    bridge.answerAsk(bridge.pendingAsks()[0].id, [{ question: 'Continue?', selected: ['B only'] }])
+    assert.equal((await second).answers[0].selected[0], 'B only')
+    bridge.publishEvent({ type: 'notice', text: 'for A', session: 'A' })
+    bridge.publishEvent({ type: 'notice', text: 'for B', session: 'B' })
+    const events = credential => fetch(url + '/events?wait=0', { headers: { authorization: 'Bearer ' + credential } }).then(r => r.json())
+    assert.deepEqual((await events(b)).events.map(e => e.text), ['for B'])
+    assert.deepEqual((await events(a)).events.map(e => e.text), ['for A'])
+    bridge.removeClient(a)
+    assert.equal((await fetch(url + '/events?wait=0', { headers: { authorization: 'Bearer ' + a } })).status, 401)
+  } finally { bridge.removeClient(a); bridge.removeClient(b); bridge.stopBridge() }
+})
+
+test('gateway: configuring another workspace cannot replace a live engine endpoint', async () => {
+  const gateway = require(path.join(temp, 'services.cjs')).m11
+  const target = cwd => ({ id: 'warpgrep', key: 'warpgrep', kind: 'warpgrep', cwd, allowlist: ['codebase_search'], timeoutMs: 1000 })
+  try {
+    gateway.configure([target('/a')], 'engine-a')
+    gateway.configure([target('/b')], 'engine-b')
+    assert.deepEqual(gateway.configuredKeys().sort(), ['engine-a/warpgrep', 'engine-b/warpgrep'])
+    for (const owner of ['engine-a', 'engine-b']) assert((await gateway.handleMessage(owner + '/warpgrep', { id: 1, method: 'initialize' })).result)
+    gateway.releaseScope('engine-b')
+    assert.equal(gateway.isConfigured('engine-a/warpgrep'), true)
+  } finally { gateway.stopAll() }
+})
+
+test('subagent API: delayed model resolution retains the caller workspace, model and parent', async () => {
+  const { createApiHandler } = require(path.join(temp, 'services.cjs')).m12
+  let resolveModel, launched
+  const api = createApiHandler({ agentSettings: () => ({ presets: [] }), subagents: () => ({ start: async options => { launched = options; return { record: options } }, get: () => ({ parentSession: 'B' }), list: () => [{ parentSession: 'B' }] }),
+    defaultMode: () => 'background', desktopTools: () => false,
+    parentSession: () => 'B', parentWorkspace: () => ({ primary: '/b', additional: [] }),
+    resolveModel: () => new Promise(resolve => { resolveModel = resolve }) })
+  const context = { sessionKey: 'A', engine: 'prophey', workspace: { primary: '/a', additional: ['/extra-a'] }, model: { provider: 'a', id: 'a-model' } }
+  const result = api({ method: 'POST', path: '/subagents', query: new URLSearchParams(), body: { task: 'task', model: 'custom' }, context })
+  resolveModel({ model: { provider: 'a', id: 'custom' } })
+  assert.equal((await result).status, 200)
+  assert.equal(launched.parentSession, 'A'); assert.equal(launched.cwd, '/a'); assert.deepEqual(launched.additional, ['/extra-a'])
+  assert.equal((await api({ method: 'GET', path: '/subagents/other', query: new URLSearchParams(), body: {}, context })).status, 404)
+  assert.deepEqual((await api({ method: 'GET', path: '/subagents', query: new URLSearchParams(), body: {}, context })).body.subagents, [])
 })
 
 test('web fetch validates redirects before requesting local addresses and limits loops', async () => {

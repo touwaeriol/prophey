@@ -224,6 +224,11 @@ function toSummaryKey(file: string): string {
   return record ? toSummary(record).path : file
 }
 
+function sessionIdentity(file: string): string {
+  const key = toSummaryKey(file)
+  return /^[A-Za-z]:/.test(key) || key.includes('\\') ? key.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase() : key
+}
+
 /**
  * Where the CLIs live.
  *
@@ -267,6 +272,7 @@ let conversationStarted = false
  */
 interface EngineSlot {
   engine: AgentEngine
+  credential: string
   status: PiStatus
   /** Set while the session is off screen and its turn is still running. */
   parked?: { key: string; cwd: string; additional: string[]; projectId?: string }
@@ -275,17 +281,27 @@ interface EngineSlot {
 const engineSlots = new WeakMap<AgentEngine, EngineSlot>()
 /** Engines still running for sessions the window is not showing, keyed by session key. */
 const parkedEngines = new Map<string, EngineSlot>()
+const restoringEngines = new Map<string, Promise<AgentEngine>>()
 
 /** Engine factory: Prophey is the default; `pi` stays available as the other engine. */
-function createEngine(): AgentEngine {
-  conversationStarted = false
+function createEngine(record?: SessionRecord): AgentEngine {
+  if (!record) conversationStarted = false
+  const engineId = record?.engine ?? currentEngineId()
   const slot: EngineSlot = {
     engine: undefined as unknown as AgentEngine,
+    credential: '',
     status: { phase: 'stopped', cwd: status.cwd }
   }
   const isActive = (): boolean => slot.engine === currentEngine
+  slot.credential = bridge.registerClient(() => ({
+    sessionKey: slot.engine.state().sessionFile,
+    engine: slot.engine.id as EngineId,
+    workspace: slot.engine.workspace(),
+    model: slot.engine.state().model
+  }))
   const shared = {
-    ask: bridge.askEngine,
+    ask: (questions: Parameters<typeof bridge.askEngine>[0], tool: string) =>
+      bridge.askEngine(questions, tool, slot.engine.state().sessionFile),
     onStatus: (next: PiStatus) => {
       const previous = slot.status
       slot.status = next
@@ -313,7 +329,7 @@ function createEngine(): AgentEngine {
       }
       // While the /btw panel is open the window must not see the fork's transcript.
       if (btwActive || switchingEngine) return
-      mainWindow?.webContents.send('pi:event', record)
+      mainWindow?.webContents.send('pi:event', { ...record, sessionKey: slot.engine.state().sessionFile })
     },
     onSettled: () => {
       if (!isActive()) {
@@ -342,13 +358,13 @@ function createEngine(): AgentEngine {
     }
   }
   let engine: AgentEngine
-  if (desktopConfig.engine === 'claude') {
+  if (engineId === 'claude') {
     engine = new ClaudeCodeEngine({
       ...shared,
       binary: claudeBinary(),
       historyStore: new ImportedHistoryStore(path.join(app.getPath('userData'), 'imports', 'claude'))
     })
-  } else if (desktopConfig.engine === 'codex') {
+  } else if (engineId === 'codex') {
     const { command, script } = codexLaunch()
     engine = new CodexEngine({
       ...shared,
@@ -358,18 +374,18 @@ function createEngine(): AgentEngine {
       sandbox: () => desktopConfig.codexSandbox,
       questions: () => desktopConfig.codexRequestUserInput !== false
     })
-  } else if (desktopConfig.engine !== 'pi') {
+  } else if (engineId !== 'pi') {
     engine = new PropheyEngine({
       ...shared,
       toolModulePath: coreToolsModule(),
       shellPath: realBashPath(),
       bashLogDirectory: path.join(app.getPath('userData'), 'command-logs'),
       transcripts: new TranscriptStore(path.join(app.getPath('userData'), 'transcripts')),
-      sessionId: () => desktopConfig.propheySessionId,
+      sessionId: () => record ? path.basename(record.path, '.jsonl') : desktopConfig.propheySessionId,
       // The app owns the id, so it is saved before the engine starts writing the new transcript.
       newSessionId: async () => {
         const id = `s_${Math.random().toString(16).slice(2, 14)}`
-        await saveConfig({ propheySessionId: id })
+        if (isActive()) await saveConfig({ propheySessionId: id })
         return id
       },
       // The same setting the window's threshold dropdown writes.
@@ -380,12 +396,12 @@ function createEngine(): AgentEngine {
       // Subagent tools reach the app's manager through the same bridge pi uses.
       bridge: () => {
         const port = desktopConfig.mcp?.bridgePort
-        const token = desktopConfig.mcp?.bridgeToken
+        const token = slot.credential
         return port && token ? { url: `http://127.0.0.1:${port}`, token } : undefined
       },
       subagentModulePath: subagentConfig().enabled ? coreToolModule('subagent.mjs') : undefined,
       askModulePath: coreToolModule('ask-user.mjs'),
-      mcpEndpoints: (workspace) => mcpEndpointsFor(workspace),
+      mcpEndpoints: (workspace) => mcpEndpointsFor(workspace, slot.credential),
       speedMode: () => currentSpeedMode()
     })
   } else {
@@ -393,12 +409,12 @@ function createEngine(): AgentEngine {
       ...shared,
       prepare: async (workspace) => {
         await applySystemProxy()
-        cancelPendingAsks('pi 已重启')
-        const launch = await mcpLaunch(workspace)
+        cancelPendingAsks('pi 已重启', slot.engine.state().sessionFile)
+        const launch = await mcpLaunch(workspace, slot.credential)
         // Keep the child process and SDK on the same configuration directory.
         const env = withRealBash({ ...launch.env })
         // Read by the extension's request hooks; it re-checks the model before touching the payload.
-        env.AGENT_DESKTOP_SPEED = speed.resolveSpeedMode(status.model, currentSpeedMode())
+        env.AGENT_DESKTOP_SPEED = speed.resolveSpeedMode(slot.status.model, currentSpeedMode())
         // The root-aware bash tool runs in the core server, which has no idea where Git Bash lives.
         const bash = realBashPath()
         if (bash) env.AGENT_DESKTOP_SHELL = bash
@@ -411,7 +427,7 @@ function createEngine(): AgentEngine {
         }
         // Several directories need to be explained to the model; one directory is just a normal session
         // and gets no section.
-        const project = activeProject()
+        const project = record ? projectStore?.get(record.projectId ?? '') : activeProject()
         if (project && workspace.additional.length > 0) {
           env.AGENT_DESKTOP_PROJECT = JSON.stringify({
             id: project.id,
@@ -425,11 +441,19 @@ function createEngine(): AgentEngine {
         env.PI_CODING_AGENT_DIR = profile.agentDir()
         return { args: launch.args, env }
       },
-      sessionArgs: () => sessionArgs(),
-      sessionDirArgs: () => sessionDirArgs()
+      sessionArgs: () => record ? ['--session', record.path] : sessionArgs(),
+      sessionDirArgs: () => record ? ['--session-dir', path.dirname(record.path)] : sessionDirArgs()
     })
   }
   slot.engine = engine
+  const dispose = engine.dispose.bind(engine)
+  engine.dispose = () => {
+    const file = engine.state().sessionFile
+    if (file) bridge.cancelAllAsks('会话引擎已关闭', file)
+    dispose()
+    bridge.removeClient(slot.credential)
+    gateway.releaseScope(slot.credential)
+  }
   engineSlots.set(engine, slot)
   return engine
 }
@@ -437,6 +461,7 @@ function createEngine(): AgentEngine {
 /** Stop paying for an off-screen engine once its turn is over; false when it must stay alive. */
 function reapParked(slot: EngineSlot): boolean {
   if (!slot.parked) return true
+  if (restoringEngines.has(sessionIdentity(slot.parked.key))) return false
   if (slot.engine.busy() || slot.engine.compacting() || slot.engine.starting()) return false
   // Background commands belong to the session: keep the engine until they finish.
   if ((slot.engine.state().backgroundTasks?.length ?? 0) > 0) return false
@@ -480,7 +505,9 @@ function parkEngine(engine: AgentEngine, file: string): void {
  */
 async function retireEngine(engine: AgentEngine): Promise<EngineSlot | undefined> {
   const file = engine.state().sessionFile
-  const busy = engine.busy() || engine.compacting()
+  const busy = engine.busy() || engine.compacting() || Boolean(engine.state().backgroundTasks?.length) ||
+    (subagents?.list() ?? []).some(record => record.parentSession === file &&
+      (record.status === 'starting' || record.status === 'streaming'))
   if (busy && file) {
     parkEngine(engine, file)
     return engineSlots.get(engine)
@@ -839,11 +866,11 @@ function coreToolsModule(): string | undefined {
  * search and their own tool set, and injecting ours would only compete with them.
  */
 async function mcpEndpointsFor(
-  workspace: AgentWorkspace
+  workspace: AgentWorkspace, credential?: string
 ): Promise<Array<{ name: string; url: string; token: string; description?: string }>> {
   if (!mcpSettings().enabled) return []
   const port = desktopConfig.mcp?.bridgePort
-  const token = desktopConfig.mcp?.bridgeToken
+  const token = credential ?? desktopConfig.mcp?.bridgeToken
   if (!port || !token) return []
   const roots = [
     {
@@ -860,7 +887,7 @@ async function mcpEndpointsFor(
     webAvailable: webReady()
   })
   // The endpoints must exist before anything connects to them.
-  gateway.configure(targets)
+  gateway.configure(targets, credential)
   return engines
     .buildEngineRegistrations({
       baseUrl: `http://127.0.0.1:${port}`,
@@ -922,9 +949,46 @@ function subagentManager(): SubagentManager {
 
 /** The live engine that owns a session, on screen or parked. */
 function engineForSession(file: string): AgentEngine | undefined {
-  const key = toSummaryKey(file)
-  if (status.sessionFile && toSummaryKey(status.sessionFile) === key) return currentEngine
-  return parkedEngines.get(key)?.engine
+  const key = sessionIdentity(file)
+  if (currentEngine.state().sessionFile && sessionIdentity(currentEngine.state().sessionFile!) === key) return currentEngine
+  return [...parkedEngines.values()].find(slot => sessionIdentity(slot.parked?.key ?? '') === key)?.engine
+}
+
+/** A late send goes to its owner, including a session whose idle engine was already released. */
+async function promptEngineForSession(key?: string): Promise<AgentEngine> {
+  // Navigation owns the engine lifecycle until it has parked the source and installed the target.
+  while (switchingEngine || currentEngine.starting()) await new Promise(resolve => setTimeout(resolve, 25))
+  if (!key) return currentEngine
+  const identity = sessionIdentity(key)
+  const pending = restoringEngines.get(identity)
+  if (pending) return pending
+  const existing = engineForSession(key)
+  if (existing?.running()) return existing
+  const record = sessionStore?.list().find(item => sessionIdentity(item.path) === identity)
+  if (!record) throw new Error('原会话不存在，消息已保留在原会话草稿中')
+  const restore = (async () => {
+    const engine = createEngine(record)
+    const slot = engineSlots.get(engine)!
+    slot.parked = { key: toSummaryKey(record.path), cwd: record.cwd, additional: record.additional ?? [], projectId: record.projectId }
+    parkedEngines.set(slot.parked.key, slot)
+    try {
+      await engine.start({ primary: record.cwd, additional: record.additional ?? [] }, {
+        session: record.path,
+        ...(record.provider && record.model ? { model: { provider: record.provider, id: record.model } } : {})
+      })
+      if (!engine.running() || engine.state().phase !== 'ready') throw new Error(engine.state().error ?? '原会话启动失败')
+      if (record.thinkingLevel) await engine.setThinkingLevel(record.thinkingLevel).catch(() => undefined)
+      engine.poll()
+      return engine
+    } catch (error) {
+      parkedEngines.delete(toSummaryKey(record.path))
+      slot.parked = undefined
+      engine.dispose()
+      throw error
+    }
+  })()
+  restoringEngines.set(identity, restore)
+  try { return await restore } finally { restoringEngines.delete(identity) }
 }
 
 function flushSubagentNotices(): void {
@@ -1034,11 +1098,11 @@ function extensionArgs(): string[] {
 }
 
 async function mcpLaunch(
-  workspace: AgentWorkspace
+  workspace: AgentWorkspace, credential?: string
 ): Promise<{ args: string[]; env: NodeJS.ProcessEnv }> {
   const settings = mcpSettings()
   if (!settings.enabled) {
-    gateway.stopAll()
+    gateway.configure([], credential)
     return { args: ['--no-mcp', ...extensionArgs()], env: {} }
   }
   if (!desktopToolAvailable()) return { args: extensionArgs(), env: {} }
@@ -1059,14 +1123,14 @@ async function mcpLaunch(
     webAvailable: webReady()
   })
   // The endpoints must exist before pi connects to them.
-  gateway.configure(targets)
+  gateway.configure(targets, credential)
   const core = settings.desktopTool
   if (!core && targets.length === 0) return { args: extensionArgs(), env: {} }
   const url = bridge.getBridgeUrl()
   const env: NodeJS.ProcessEnv = { AGENT_DESKTOP_MCP_TOGGLES: JSON.stringify(toolToggles()) }
   if (url) {
     env.AGENT_DESKTOP_MCP_URL = url
-    env.AGENT_DESKTOP_MCP_TOKEN = bridge.getBridgeToken()
+    env.AGENT_DESKTOP_MCP_TOKEN = credential ?? bridge.getBridgeToken()
   }
   if (core) {
     env.AGENT_DESKTOP_MCP_CORE_SCRIPT = mcpServerScript()
@@ -1079,7 +1143,7 @@ async function mcpLaunch(
     env.AGENT_DESKTOP_MCP_ENGINES = JSON.stringify(
       engines.buildEngineRegistrations({
         baseUrl: url,
-        token: bridge.getBridgeToken(),
+        token: credential ?? bridge.getBridgeToken(),
         targets,
         toggles: toolToggles()
       })
@@ -1452,9 +1516,10 @@ function currentSpeedMode(): SpeedMode {
   return mode === 'fast' || mode === 'ultrafast' ? mode : 'standard'
 }
 
-function cancelPendingAsks(reason: string): void {
-  bridge.cancelAllAsks(reason)
-  mainWindow?.webContents.send('ask:cleared')
+function cancelPendingAsks(reason: string, sessionKey = currentEngine?.state().sessionFile): void {
+  if (!sessionKey) return
+  bridge.cancelAllAsks(reason, sessionKey)
+  mainWindow?.webContents.send('ask:cleared', { sessionKey })
 }
 
 /**
@@ -1665,18 +1730,17 @@ async function btwPrompt(message: string): Promise<{ text: string; settled: bool
 function submitPrompt(
   message: string,
   behavior?: 'steer' | 'followUp',
-  images?: PromptImage[]
+  images?: PromptImage[],
+  owner = currentEngine
 ): Promise<PromptResult> {
-  if (switchingEngine) return Promise.resolve({ ok: false, error: '正在迁移对话，请稍候' })
-  const caps = currentEngine.capabilities()
+  const caps = owner.capabilities()
   if (images?.length && !caps.images)
     return Promise.resolve({ ok: false, error: '当前引擎不支持图片' })
-  if (behavior === 'steer' && currentEngine.busy() && !caps.steer)
+  if (behavior === 'steer' && owner.busy() && !caps.steer)
     return Promise.resolve({ ok: false, error: '当前引擎不支持运行中引导，请排队发送' })
-  const owner = currentEngine
-  const firstRequest = !conversationStarted && owner.running() && Boolean(message.trim() || images?.length)
+  const firstRequest = owner === currentEngine && !conversationStarted && owner.running() && Boolean(message.trim() || images?.length)
   const titleModel = owner.state().model ? { ...owner.state().model! } : undefined
-  if (currentEngine.running() && (message.trim() || images?.length)) {
+  if (owner === currentEngine && owner.running() && (message.trim() || images?.length)) {
     conversationStarted = true
     broadcastStatus()
   }
@@ -1724,6 +1788,7 @@ async function activateConversation(options: {
   const record = options.sessionPath ? sessionStore?.byPath(options.sessionPath) : undefined
   const file = record?.path || options.sessionPath
   const targetKey = file ? toSummaryKey(file) : undefined
+  if (file) await restoringEngines.get(sessionIdentity(file))
 
   // The session's engine is still running off screen: bring it back instead of replacing it, so
   // the turn continues exactly where it was (and no work is lost).
@@ -1733,17 +1798,24 @@ async function activateConversation(options: {
       // It finished while off screen: fall through and reopen from the transcript, which also
       // picks up any config change made in the meantime.
     } else {
-      await rememberSession({}, true)
-      // The session being left behind is either parked too (if it is running) or disposed.
-      if (currentEngine !== parked.engine) await retireEngine(currentEngine)
-      activateParked(parked)
-      await saveConfig({
-        engine: parked.engine.id as EngineId,
-        cwd: record?.cwd || options.cwd,
-        activeProject: record?.projectId ?? options.projectId,
-        activeSession: record ? toSummary(record).path : undefined
-      })
-      await rememberSession({}, true)
+      switchingEngine = parked.engine.id as EngineId
+      broadcastStatus()
+      try {
+        await rememberSession({}, true)
+        // The session being left behind is either parked too (if it is running) or disposed.
+        if (currentEngine !== parked.engine) await retireEngine(currentEngine)
+        activateParked(parked)
+        await saveConfig({
+          engine: parked.engine.id as EngineId,
+          cwd: record?.cwd || options.cwd,
+          activeProject: record?.projectId ?? options.projectId,
+          activeSession: record ? toSummary(record).path : undefined
+        })
+        await rememberSession({}, true)
+      } finally {
+        switchingEngine = undefined
+        broadcastStatus()
+      }
       return statusSnapshot()
     }
   }
@@ -1824,7 +1896,7 @@ function registerIpc(): void {
     const mutatesEngine =
       (channel.startsWith('pi:') && !/^pi:(get-|list-|repo|session-stats|open-agent-dir)/.test(channel)) ||
       /^desktop:set-|^engine:(command$|sandbox|codex-questions)|^projects:(activate|create|update|remove|add-root)|^mcp:(set-|add-|remove-)|^agents:(save-|delete-|set-)|^providers:(save-|set-|logout|import-cli)|^settings:save/.test(channel)
-    if (switchingEngine && mutatesEngine) throw new Error('正在迁移对话，请等待引擎切换完成')
+    if (switchingEngine && mutatesEngine && channel !== 'pi:prompt') throw new Error('正在迁移对话，请等待引擎切换完成')
     return listener(event, ...args)
   })
   handle('pi:get-status', () => statusSnapshot())
@@ -2096,8 +2168,14 @@ function registerIpc(): void {
       _event,
       message: string,
       streamingBehavior?: 'steer' | 'followUp',
-      images?: PromptImage[]
-    ) => submitPrompt(message, streamingBehavior, images)
+      images?: PromptImage[],
+      sessionKey?: string
+    ) => {
+      try {
+        const owner = await promptEngineForSession(sessionKey)
+        return await submitPrompt(message, streamingBehavior, images, owner)
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+    }
   )
 
   handle('pi:abort', async () => {
@@ -2164,20 +2242,27 @@ function registerIpc(): void {
   })
 
   handle('pi:session-stats', async () => {
-    if (!currentEngine.running()) return {}
+    const owner = currentEngine
+    const sessionKey = owner.state().sessionKey ?? owner.state().sessionFile
+    if (!owner.running()) return { sessionKey }
     try {
-      return (await currentEngine.stats()) as SessionStats
+      return { ...((await owner.stats()) as SessionStats), sessionKey }
     } catch {
       return {}
     }
   })
 
   // Session panel: stop one background command. Only Prophey owns a task list (see engine.ts).
-  handle('engine:stop-background-task', async (_event, id: string) => {
-    if (!currentEngine?.stopBackgroundTask) {
+  handle('engine:read-background-task', async (_event, id: string, sessionKey?: string) => {
+    const owner = sessionKey ? engineForSession(sessionKey) : currentEngine
+    return owner?.readBackgroundTask?.(String(id)) ?? { ok: false, error: '原会话没有可读取的后台命令' }
+  })
+  handle('engine:stop-background-task', async (_event, id: string, sessionKey?: string) => {
+    const owner = sessionKey ? engineForSession(sessionKey) : currentEngine
+    if (!owner?.stopBackgroundTask) {
       return { ok: false, error: '当前引擎不提供后台任务列表，请在对话里用 stop_bash_task' }
     }
-    return currentEngine.stopBackgroundTask(String(id))
+    return owner.stopBackgroundTask(String(id))
   })
 
   // Session panel: show a produced file in Explorer/Finder. Only paths inside the session's
@@ -2237,6 +2322,7 @@ function registerIpc(): void {
   handle('ask:cancel', (_event, id: string, reason?: string) => {
     bridge.cancelAsk(id, reason ?? '用户取消了提问')
   })
+  handle('ask:list', () => bridge.pendingAsks())
 
   handle('mcp:state', () => buildMcpState())
 
@@ -3010,9 +3096,11 @@ app.whenReady().then(async () => {
   status = { phase: 'stopped', cwd }
   await startBridge()
   bridge.setAskListener((request) => {
+    request.sessionKey ??= currentEngine.state().sessionFile
     if (mainWindow) mainWindow.webContents.send('ask:request', request)
     else bridge.cancelAsk(request.id, '桌面窗口未就绪')
   })
+  bridge.setAskSettledListener(id => mainWindow?.webContents.send('ask:cleared', { id }))
   bridge.setToolsListener((servers) => {
     const next: ToolCache = { ...toolCache }
     for (const [server, tools] of Object.entries(servers)) {
@@ -3020,12 +3108,14 @@ app.whenReady().then(async () => {
     }
     void saveToolCache(next).then(() => broadcastMcpState())
   })
-  bridge.setMcpHandler((engine, message) => {
+  bridge.setMcpHandler((engine, message, scope) => {
+    if (scope) engine = scope + '/' + engine
     // Endpoints are `codegraph`, `codegraph__<repo>`, `warpgrep`, … — a project adds one per root.
     if (!gateway.isConfigured(engine)) {
       return Promise.reject(new Error(`未知网关端点：${engine}`))
     }
-    return gateway.handleMessage(engine, message)
+    return scope ? web.withWebModel(bridge.clientContext(scope)?.model ?? {}, () => gateway.handleMessage(engine, message))
+      : gateway.handleMessage(engine, message)
   })
   bridge.setApiHandler(
     createApiHandler({

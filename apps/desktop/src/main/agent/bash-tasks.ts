@@ -45,6 +45,11 @@ export class BashTasks {
     return [...this.tasks.values()].filter(task => task.background && task.state !== 'running').length
   }
 
+  history(): Array<{ id: string; command: string; startedAt: number; state: string }> {
+    return [...this.tasks.values()].filter(task => task.background && task.state !== 'running')
+      .reverse().map(({ id, command, startedAt, state }) => ({ id, command, startedAt, state }))
+  }
+
   private changed(): void { this.options.onChange?.(this.active()) }
 
   async stopAll(): Promise<void> {

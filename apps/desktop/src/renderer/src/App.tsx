@@ -53,7 +53,7 @@ const COMPOSER_STORAGE_KEY = 'pi-session-composer'
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<PiStatus>({ phase: 'starting', cwd: '' })
   const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [activePath, setActivePath] = useState<string | undefined>(undefined)
+  const activePath = status.sessionKey ?? status.sessionFile
   const [items, setItems] = useState<ChatItem[]>([])
   /**
    * Composer state is per conversation.
@@ -73,8 +73,9 @@ export default function App(): React.JSX.Element {
   })
   /** Session the composer currently belongs to; a ref so async callbacks target the same one. */
   const composerKeyRef = useRef(LOCAL_COMPOSER_KEY)
-  composerKeyRef.current = composerKey(activePath)
-  const activeComposer = composerFor(composers, composerKeyRef.current)
+  const activeComposerKey = composerKey(status.sessionKey ?? status.sessionFile)
+  useEffect(() => { composerKeyRef.current = activeComposerKey }, [activeComposerKey])
+  const activeComposer = composerFor(composers, activeComposerKey)
   const draft = activeComposer.draft
   const draftImages = activeComposer.images
   // Messages written while a run is streaming: they wait here and are sent when it settles.
@@ -82,30 +83,30 @@ export default function App(): React.JSX.Element {
   /** React-shaped setters that only ever touch the active session's composer. */
   const setDraft = useCallback((next: string | ((previous: string) => string)) => {
     setComposers((map) =>
-      patchComposer(map, composerKeyRef.current, (previous) => ({
+      patchComposer(map, activeComposerKey, (previous) => ({
         draft: typeof next === 'function' ? next(previous.draft) : next
       }))
     )
-  }, [])
+  }, [activeComposerKey])
   const setDraftImages = useCallback(
     (next: DraftImage[] | ((previous: DraftImage[]) => DraftImage[])) => {
       setComposers((map) =>
-        patchComposer(map, composerKeyRef.current, (previous) => ({
+        patchComposer(map, activeComposerKey, (previous) => ({
           images: typeof next === 'function' ? next(previous.images) : next
         }))
       )
     },
-    []
+    [activeComposerKey]
   )
   const setQueued = useCallback(
     (next: QueuedMessage[] | ((previous: QueuedMessage[]) => QueuedMessage[])) => {
       setComposers((map) =>
-        patchComposer(map, composerKeyRef.current, (previous) => ({
+        patchComposer(map, activeComposerKey, (previous) => ({
           queued: typeof next === 'function' ? next(previous.queued) : next
         }))
       )
     },
-    []
+    [activeComposerKey]
   )
   useEffect(() => {
     // Keystrokes typed before the window knew its session belong to the session it lands on.
@@ -124,18 +125,16 @@ export default function App(): React.JSX.Element {
   const [mcpOpen, setMcpOpen] = useState(false)
   const [subagentsOpen, setSubagentsOpen] = useState(false)
   const [subagentFocus, setSubagentFocus] = useState<string | undefined>(undefined)
-  const [subagents, setSubagents] = useState<SubagentView[]>([])
+  const [allSubagents, setSubagents] = useState<SubagentView[]>([])
+  const subagents = allSubagents.filter(record => record.parentSession && messagesBelong(record.parentSession, status))
   const [mcpState, setMcpState] = useState<McpState | undefined>(undefined)
   /** Context-window usage of the current session, shown next to the composer. */
   const [contextUsage, setContextUsage] = useState<
     { tokens?: number | null; contextWindow?: number; percent?: number | null } | undefined
   >(undefined)
-  const queueRef = useRef<QueuedMessage[]>([])
-  useEffect(() => {
-    queueRef.current = queued
-  }, [queued])
   /** Bumped after a queued command runs, so the queue keeps draining without a run to end. */
   const [queueTick, setQueueTick] = useState(0)
+  const queueSending = useRef(new Set<string>())
   const [run, setRun] = useState<{
     startedAt?: number
     endedAt?: number
@@ -229,10 +228,11 @@ export default function App(): React.JSX.Element {
   const historyRef = useRef<{ stack: string[]; index: number }>({ stack: [], index: -1 })
   const [historyNav, setHistoryNav] = useState({ canBack: false, canForward: false })
   const askQueueRef = useRef<AskRequest[]>([])
-  askQueueRef.current = askQueue
+  const sessionAsks = askQueue.filter(request => messagesBelong(request.sessionKey, status))
+  askQueueRef.current = sessionAsks
   const btwChatRef = useRef<BtwChat | undefined>(undefined)
   btwChatRef.current = btwChat
-  const ask = askQueue[0]
+  const ask = sessionAsks[0]
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   stickRef.current = stick
@@ -395,7 +395,6 @@ export default function App(): React.JSX.Element {
       setActiveProjectId(id)
       setStatus(result)
       setItems([])
-      setActivePath(result.sessionKey ?? result.sessionFile)
       if (current) setToast(`已在项目「${current.name}」新建会话`)
       await loadSessions()
       } catch (error) { setToast(error instanceof Error ? error.message : String(error)) }
@@ -416,7 +415,6 @@ export default function App(): React.JSX.Element {
       setStatus(started)
       setActiveProjectId(undefined)
       setItems([])
-      setActivePath(started.sessionKey ?? started.sessionFile)
       setToast('已创建单目录会话')
       await loadSessions()
     }
@@ -425,7 +423,6 @@ export default function App(): React.JSX.Element {
       if (!('phase' in started)) { setToast(started.error); return }
       setActiveProjectId(result.project.id)
       setStatus(started)
-      setActivePath(started.sessionKey ?? started.sessionFile)
       setItems([])
       setToast(`已创建项目「${result.project.name}」`)
       await loadSessions()
@@ -468,7 +465,7 @@ export default function App(): React.JSX.Element {
     const owner = statusRef.current
     const isCurrent = (): boolean => request === messagesRequest.current &&
       statusRef.current.phase === 'ready' && !statusRef.current.switchingEngine &&
-      statusRef.current.engine === owner.engine && statusRef.current.sessionFile === owner.sessionFile
+      statusRef.current.engine === owner.engine && messagesBelong(owner.sessionKey ?? owner.sessionFile, statusRef.current)
     try {
       const payload = await window.pi.getMessages()
       // The engine names the session it answered from. While a switch is in flight it can still
@@ -484,7 +481,7 @@ export default function App(): React.JSX.Element {
       setItems(toChatItems(payload.messages))
       setStick(true)
       const stats = await window.pi.getSessionStats().catch(() => undefined)
-      if (!isCurrent()) return
+      if (!isCurrent() || !messagesBelong(stats?.sessionKey, owner)) return
       // Reopening a session that kept running in the background: the run already started, so the
       // status bar has to keep counting instead of disappearing until the next `agent_start`.
       setRun({
@@ -502,14 +499,18 @@ export default function App(): React.JSX.Element {
 
   const handleEvent = useCallback(
     (record: Record<string, unknown>) => {
+      if (record.type === 'session_title_updated' || record.type === 'session_updated') {
+        void loadSessions()
+        return
+      }
+      const owner = statusRef.current
+      if (owner.switchingEngine || !messagesBelong(record.sessionKey as string | undefined, owner)) return
+      // Invalidate snapshots begun before this event so a late fetch cannot erase new output.
+      messagesRequest.current++
       const type = String(record.type ?? '')
       const now = Date.now()
       setItems((prev) => applyConversationEvent(prev, record, now))
       switch (type) {
-        case 'session_title_updated':
-        case 'session_updated':
-          void loadSessions()
-          break
         case 'agent_start':
           setRun({ startedAt: Date.now(), runningTools: 0 })
           break
@@ -524,6 +525,7 @@ export default function App(): React.JSX.Element {
           void window.pi
             .getSessionStats()
             .then((stats) => {
+              if (!messagesBelong(stats.sessionKey, statusRef.current)) return
               setRun((prev) => ({ ...prev, tokens: stats.tokens?.total }))
               setContextUsage(stats.contextUsage)
             })
@@ -559,10 +561,17 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     void window.pi.getStatus().then(setStatus)
-    const offStatus = window.pi.onStatus(setStatus)
+    const offStatus = window.pi.onStatus((next) => {
+      // IPC events can arrive in the same React batch; route them using the latest wire status.
+      statusRef.current = next
+      setStatus(next)
+    })
     const offEvent = window.pi.onEvent(handleEvent)
     const offAsk = window.pi.onAskRequest((request) => setAskQueue((queue) => [...queue, request]))
-    const offAskCleared = window.pi.onAskCleared(() => setAskQueue([]))
+    const offAskCleared = window.pi.onAskCleared((payload) => setAskQueue(queue =>
+      payload?.id ? queue.filter(request => request.id !== payload.id) :
+        payload?.sessionKey ? queue.filter(request => !messagesBelong(request.sessionKey, payload)) : []))
+    void window.pi.listAsks().then(setAskQueue)
     return () => {
       offStatus()
       offEvent()
@@ -586,10 +595,6 @@ export default function App(): React.JSX.Element {
       })
     })
   }, [])
-
-  useEffect(() => {
-    if (status.phase !== 'ready') setAskQueue([])
-  }, [status.phase])
 
   // Connectors in the session panel follow the main process instead of asking once on open.
   useEffect(() => {
@@ -619,7 +624,6 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     if (status.phase !== 'ready') return
-    setActivePath(status.sessionKey ?? status.sessionFile)
     void loadMessages()
     void loadSessions()
   }, [status.phase, status.sessionFile, status.sessionKey, status.engine, loadMessages, loadSessions])
@@ -633,6 +637,12 @@ export default function App(): React.JSX.Element {
     if (!key || shownSession.current === key) return
     shownSession.current = key
     setItems([])
+    setContextUsage(undefined)
+    setRun({ runningTools: 0 })
+    setSubagentsOpen(false)
+    setSubagentFocus(undefined)
+    setCommandOutput(undefined)
+    setToast(null)
     setStick(true)
   }, [status.phase, status.sessionKey, status.sessionFile])
 
@@ -648,14 +658,14 @@ export default function App(): React.JSX.Element {
     void window.pi
       .getSessionStats()
       .then((stats) => {
-        if (cancelled || !stats?.contextUsage) return
+        if (cancelled || !stats?.contextUsage || !messagesBelong(stats.sessionKey, statusRef.current)) return
         setContextUsage(stats.contextUsage)
       })
       .catch(() => undefined)
     return () => {
       cancelled = true
     }
-  }, [status.phase, status.autoCompactPercent, status.model?.id, status.model?.contextWindow])
+  }, [status.phase, status.sessionKey, status.sessionFile, status.autoCompactPercent, status.model?.id, status.model?.contextWindow])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -699,7 +709,9 @@ export default function App(): React.JSX.Element {
     async (
       text: string,
       images: DraftImage[],
-      behavior?: 'steer' | 'followUp'
+      behavior?: 'steer' | 'followUp',
+      owner = composerKeyRef.current,
+      restoreDraft = true
     ): Promise<boolean> => {
       // pi is parked on the `/btw` fork while that panel is open; nothing may go there by accident.
       if (btwChatRef.current) {
@@ -708,7 +720,7 @@ export default function App(): React.JSX.Element {
       }
       // The session that asked for the send, captured before any await: a failure has to restore
       // the text there even if the user switched conversations in the meantime.
-      const owner = composerKeyRef.current
+      if (owner !== composerKeyRef.current || statusRef.current.switchingEngine) return false
       setStick(true)
       const localId = `local-${Date.now()}`
       setItems((prev) => [
@@ -729,12 +741,15 @@ export default function App(): React.JSX.Element {
           type: 'image' as const,
           data: image.data,
           mimeType: image.mimeType
-        }))
-      )
+        })), owner
+      ).catch(error => ({ ok: false, error: error instanceof Error ? error.message : String(error), queued: false }))
       if (!result.ok) {
         setItems((prev) => prev.filter((item) => item.id !== localId))
-        setComposers((map) => patchComposer(map, owner, { draft: text, images }))
-        setToast(result.error ?? '发送失败')
+        if (restoreDraft) setComposers((map) => patchComposer(map, owner, previous => ({
+          draft: previous.draft ? `${text}\n${previous.draft}` : text,
+          images: [...images, ...previous.images]
+        })))
+        if (owner === composerKeyRef.current) setToast(result.error ?? '发送失败')
         return false
       }
       if (result.queued) setToast('pi 还在收尾，这条已排队，会在本轮结束后发送')
@@ -757,8 +772,6 @@ export default function App(): React.JSX.Element {
       return
     }
     setItems([])
-    const next = await window.pi.getStatus()
-    setActivePath(next.sessionKey ?? next.sessionFile)
     void loadSessions()
   }, [loadSessions])
 
@@ -784,10 +797,12 @@ export default function App(): React.JSX.Element {
     const id = `qc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     setQueued((prev) => [...prev, { id, text, images: [], command: true }])
     setToast(`${text.split(' ')[0]} 已排队，本轮结束后自动执行`)
-  }, [])
+  }, [setQueued])
 
   const runCommand = useCallback(
     async (raw: string, options: { queued?: boolean } = {}): Promise<boolean> => {
+      const owner = composerKeyRef.current
+      const stillHere = (): boolean => owner === composerKeyRef.current && !statusRef.current.switchingEngine
       // Called from the queue flush: pi picked up work again, so report "not handled" and let the
       // flush put the item back instead of running a session command mid-run.
       if (options.queued && piBusy()) return false
@@ -814,6 +829,7 @@ export default function App(): React.JSX.Element {
           return true
         }
         const result = await window.pi.executeEngineCommand(command.name, arg)
+        if (!stillHere()) return true
         if (result.ok && result.text) setCommandOutput({ title: command.name, text: result.text })
         else setToast(result.ok ? '命令已执行' : result.error || '命令失败')
         await loadMessages()
@@ -824,6 +840,7 @@ export default function App(): React.JSX.Element {
           if (defer()) return true
           // A session switch drops the `/btw` fork on the main side; close the panel with it.
           await closeBtw()
+          if (!stillHere()) return false
           await newSession()
           setToast('已清空当前会话')
           return true
@@ -831,8 +848,10 @@ export default function App(): React.JSX.Element {
         case 'compact': {
           if (defer()) return true
           await closeBtw()
+          if (!stillHere()) return false
           setToast(arg ? `正在压缩（自定义提示词：${arg}）…` : '正在压缩上下文…')
           const result = await window.pi.compactSession(arg || undefined)
+          if (!stillHere()) return true
           if (!result.ok) {
             setToast(result.error ?? '压缩失败')
             return true
@@ -862,6 +881,7 @@ export default function App(): React.JSX.Element {
           }
           if (defer()) return true
           await closeBtw()
+          if (!stillHere()) return false
           const result = await window.pi.setCompactThreshold(tokens)
           setToast(
             result.ok
@@ -919,12 +939,14 @@ export default function App(): React.JSX.Element {
    */
   useEffect(() => {
     // `compacting` counts as busy: pi refuses prompts while it rewrites the context.
-    if (status.isStreaming || status.compacting || status.phase !== 'ready') return
+    if (status.isStreaming || status.compacting || status.switchingEngine || status.phase !== 'ready') return
     // The queue belongs to the main session: never flush it into an open `/btw` fork.
     if (btwChatRef.current) return
     const owner = composerKeyRef.current
-    const next = queueRef.current[0]
+    if (queueSending.current.has(owner)) return
+    const next = queued[0]
     if (!next || (next.command && engineCommands.length === 0)) return
+    queueSending.current.add(owner)
     // The queue is the active session's, so this is a no-op filter for any other session.
     setComposers((map) =>
       patchComposer(map, owner, (previous) => ({
@@ -939,6 +961,7 @@ export default function App(): React.JSX.Element {
      * over. Ask main for its status (the push may have been missed) and retry after a pause.
      */
     const restore = (): void => {
+      queueSending.current.delete(owner)
       setComposers((map) =>
         patchComposer(map, owner, (previous) => ({
           queued: previous.queued.some((item) => item.id === next.id)
@@ -954,19 +977,20 @@ export default function App(): React.JSX.Element {
       void runCommand(next.text, { queued: true }).then(
         (handled) => {
           if (!handled) restore()
-          else setQueueTick((value) => value + 1)
+          else { queueSending.current.delete(owner); setQueueTick((value) => value + 1) }
         },
         () => restore()
       )
       return
     }
-    void deliver(next.text, next.images).then(
+    void deliver(next.text, next.images, undefined, owner, false).then(
       (ok) => {
         if (!ok) restore()
+        else { queueSending.current.delete(owner); setQueueTick((value) => value + 1) }
       },
       () => restore()
     )
-  }, [status.isStreaming, status.compacting, status.phase, deliver, runCommand, queueTick, btwChat])
+  }, [status.isStreaming, status.compacting, status.switchingEngine, status.phase, activeComposerKey, deliver, runCommand, queueTick, btwChat])
 
   const askBtw = useCallback(async () => {
     const text = btwDraft.trim()
@@ -1003,6 +1027,8 @@ export default function App(): React.JSX.Element {
   }, [btwChat, closeBtw])
   const send = useCallback(
     async (mode: 'send' | 'steer') => {
+      const owner = activeComposerKey
+      if (statusRef.current.switchingEngine || owner !== composerKeyRef.current) return
       const text = draft.trim()
       if (!text && draftImages.length === 0) return
       // Slash commands are local: they run here and never become a message, streaming or not.
@@ -1014,6 +1040,7 @@ export default function App(): React.JSX.Element {
         setDraft('')
         const handled = await runCommand(text)
         if (handled) return
+        if (owner !== composerKeyRef.current) return
       }
       // pi is parked on the `/btw` fork while that panel is open; nothing may go there by accident.
       if (btwChatRef.current) {
@@ -1036,9 +1063,9 @@ export default function App(): React.JSX.Element {
       }
       setDraft('')
       setDraftImages([])
-      await deliver(text, draftImages, streaming ? 'steer' : undefined)
+      await deliver(text, draftImages, streaming ? 'steer' : undefined, owner)
     },
-    [draft, draftImages, deliver, runCommand, capabilities?.steer]
+    [draft, draftImages, deliver, runCommand, capabilities?.steer, activeComposerKey, setDraft, setDraftImages, setQueued]
   )
   const selectSession = useCallback(
     async (session: SessionSummary, options: { remember?: boolean } = {}) => {
@@ -1050,7 +1077,6 @@ export default function App(): React.JSX.Element {
         setToast(error instanceof Error ? error.message : String(error))
         return
       }
-      setActivePath(session.path)
       if (options.remember !== false) rememberSession(session.path)
       setStick(true)
       await loadMessages()
@@ -1086,7 +1112,6 @@ export default function App(): React.JSX.Element {
     if (next.phase === 'error') throw new Error(next.error ?? '无法打开目录')
     setStatus(next)
     setActiveProjectId(undefined)
-    setActivePath(next.sessionKey ?? next.sessionFile)
     setItems([])
     setStick(true)
     setToast(`已在 ${next.cwd} 新建会话`)
@@ -1100,7 +1125,6 @@ export default function App(): React.JSX.Element {
     if (next.phase === 'error') throw new Error(next.error ?? '无法打开目录')
     setStatus(next)
     setActiveProjectId(undefined)
-    setActivePath(next.sessionKey ?? next.sessionFile)
     setItems([])
     setStick(true)
     setToast(`已在 ${cwd} 新建会话`)
@@ -1323,13 +1347,14 @@ export default function App(): React.JSX.Element {
             {ask && (
               <AskQuestionPanel
                 request={ask}
-                queued={askQueue.length - 1}
+                queued={sessionAsks.length - 1}
                 onSubmit={answerAsk}
                 onCancel={cancelAsk}
               />
             )}
 
             <Composer
+              key={activeComposerKey}
               capabilities={capabilities}
               commands={engineCommands}
               value={draft}
@@ -1361,7 +1386,7 @@ export default function App(): React.JSX.Element {
               onSend={(mode) => void send(mode)}
               onStop={() => void window.pi.abort()}
               streaming={Boolean(status.isStreaming || status.compacting)}
-              disabled={status.phase !== 'ready' || Boolean(btwChat)}
+              disabled={status.phase !== 'ready' || Boolean(status.switchingEngine) || Boolean(btwChat)}
               status={status}
               onChooseWorkspace={() => void chooseWorkspace()}
               statusBar={
@@ -1384,6 +1409,9 @@ export default function App(): React.JSX.Element {
 
           {panelOpen && (
             <SessionPanel
+              key={activeComposerKey}
+              subagents={subagents}
+              onOpenSubagent={openSubagents}
               status={status}
               contextUsage={contextUsage}
               additional={activeAdditional}

@@ -58,21 +58,23 @@ module.exports = async function sessionPanelSmoke(evaluate, until, window) {
 
   // Outputs: a write_file tool call in the transcript becomes a row (the extractor is unit-tested).
   const base = Date.now()
-  window.webContents.send('pi:event', { type: 'message_start', message: { role: 'assistant' } })
-  window.webContents.send('pi:event', {
+  const owner = await evaluate('window.pi.getStatus().then(s => s.sessionKey ?? s.sessionFile)')
+  const emit = record => window.webContents.send('pi:event', { ...record, sessionKey: owner })
+  emit({ type: 'message_start', message: { role: 'assistant' } })
+  emit({
     type: 'tool_execution_start',
     toolCallId: 'proof-write',
     toolName: 'write_file',
     arguments: { path: 'src/proof.ts', content: 'export const proof = true' }
   })
-  window.webContents.send('pi:event', {
+  emit({
     type: 'tool_execution_end',
     toolCallId: 'proof-write',
     toolName: 'write_file',
     arguments: { path: 'src/proof.ts', content: 'export const proof = true' },
     result: 'ok'
   })
-  window.webContents.send('pi:event', {
+  emit({
     type: 'message_end',
     message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] }
   })
@@ -102,7 +104,7 @@ module.exports = async function sessionPanelSmoke(evaluate, until, window) {
   assert.match(tasks, /3 个已完成/)
   assert.equal(await evaluate(`!!${card('后台任务')}.querySelector('.panel-icon-btn')`), true)
   // The stop IPC is wired even though this fixture task never existed in the engine.
-  const stopped = await evaluate('window.pi.stopBackgroundTask("bash_proof")')
+  const stopped = await evaluate(`window.pi.stopBackgroundTask("bash_proof", ${JSON.stringify(owner)})`)
   assert.equal(stopped.ok, false)
   assert.match(stopped.error, /未知命令任务|没有后台命令/)
 

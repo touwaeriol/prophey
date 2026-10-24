@@ -62,6 +62,11 @@ function agentView(preset: AgentSettings['presets'][number]): Record<string, unk
 export function createApiHandler(deps: ApiDeps): (request: ApiRequest) => Promise<ApiResponse> {
   return async (request) => {
     const { method, path, query, body } = request
+    // Snapshot the caller before any await; the visible conversation can change meanwhile.
+    const caller = request.context ?? {
+      sessionKey: deps.parentSession?.(), engine: deps.engine?.() ?? 'pi',
+      workspace: deps.parentWorkspace?.(), model: deps.parentModel?.()
+    }
 
     if (path === '/agents') {
       const settings = deps.agentSettings()
@@ -98,7 +103,7 @@ export function createApiHandler(deps: ApiDeps): (request: ApiRequest) => Promis
     }
 
     if (path === '/subagents' && method === 'POST') {
-      const engine = deps.engine?.() ?? 'pi'
+      const engine = caller.engine
       if (engine === 'claude' || engine === 'codex') {
         return fail(400, 'NATIVE_SUBAGENTS', '当前引擎使用自带子代理，不适用桌面子代理 MCP')
       }
@@ -122,8 +127,8 @@ export function createApiHandler(deps: ApiDeps): (request: ApiRequest) => Promis
         resolvedModel = resolution.model
       }
       try {
-        const parent = deps.parentWorkspace?.()
-        const inherited = !preset?.model || preset.model === 'inherit' ? deps.parentModel?.() : undefined
+        const parent = caller.workspace
+        const inherited = !preset?.model || preset.model === 'inherit' ? caller.model : undefined
         const selected = resolvedModel ?? inherited
         const result = await manager.start({
           engine,
@@ -144,7 +149,7 @@ export function createApiHandler(deps: ApiDeps): (request: ApiRequest) => Promis
               ? body.notify
               : undefined,
           desktopTools: deps.desktopTools(),
-          parentSession: deps.parentSession?.()
+          parentSession: caller.sessionKey
         })
         return ok({
           subagent: result.record,
@@ -162,7 +167,7 @@ export function createApiHandler(deps: ApiDeps): (request: ApiRequest) => Promis
       const status = query.get('status') ?? undefined
       const agent = query.get('agent') ?? undefined
       const limit = Number(query.get('limit') ?? 0)
-      const all = deps.subagents().list()
+      const all = deps.subagents().list().filter(record => !request.context || record.parentSession === caller.sessionKey)
       let list = all
       if (status) list = list.filter((record) => record.status === status)
       if (agent) list = list.filter((record) => record.agent === agent)
@@ -185,6 +190,7 @@ export function createApiHandler(deps: ApiDeps): (request: ApiRequest) => Promis
       const manager = deps.subagents()
       const record = manager.get(id)
       if (!record) return fail(404, 'UNKNOWN_SUBAGENT', `未知子代理：${id}`)
+      if (request.context && record.parentSession !== caller.sessionKey) return fail(404, 'UNKNOWN_SUBAGENT', `当前会话没有子代理：${id}`)
 
       if (!action && method === 'GET') {
         const include = (query.get('include') ?? 'status')

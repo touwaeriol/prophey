@@ -24,6 +24,13 @@ after(() => fs.rmSync(temp, { recursive: true, force: true }))
 
 const queued = (id, text) => ({ id, text, images: [] })
 
+test('composer: Windows case and slash variants share one owner after restart', () => {
+  const key = composer.composerKey('D:\\Repo\\SESSION.jsonl')
+  assert.equal(key, composer.composerKey('d:/repo/session.jsonl'))
+  const map = composer.parseComposers(JSON.stringify({ 'D:\\Repo\\SESSION.jsonl': { draft: 'retained', images: [], queued: [] } }))
+  assert.equal(composer.composerFor(map, key).draft, 'retained')
+})
+
 test('composer: a draft typed in one session is not visible in another', () => {
   let map = composer.patchComposer({}, 'a.jsonl', { draft: 'half written' })
   assert.equal(composer.composerFor(map, 'a.jsonl').draft, 'half written')

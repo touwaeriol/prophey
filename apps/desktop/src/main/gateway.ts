@@ -521,9 +521,12 @@ function createGateway(target: EngineTarget): Gateway {
 }
 
 /** Point the endpoints at the engines for the current session directory. */
-export function configure(targets: EngineTarget[]): void {
+export function configure(targets: EngineTarget[], scope = ''): void {
+  const prefix = scope ? scope + '/' : ''
+  targets = targets.map(target => ({ ...target, key: prefix + target.key }))
   const wanted = new Set(targets.map((target) => target.key))
   for (const [key, gateway] of gateways) {
+    if (scope ? !key.startsWith(prefix) : key.includes('/')) continue
     if (!wanted.has(key)) {
       gateway.stop()
       gateways.delete(key)
@@ -543,6 +546,8 @@ export function configure(targets: EngineTarget[]): void {
     gateways.set(target.key, createGateway(target))
   }
 }
+
+export function releaseScope(scope: string): void { configure([], scope) }
 
 export function isConfigured(key: string): boolean {
   return gateways.has(key)

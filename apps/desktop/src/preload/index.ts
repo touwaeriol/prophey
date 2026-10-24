@@ -63,14 +63,15 @@ const bridge: PiBridge = {
   getProxyInfo: () => ipcRenderer.invoke('app:proxy'),
   chooseWorkspace: (options?: { stop?: boolean }) =>
     ipcRenderer.invoke('pi:choose-workspace', options) as Promise<PiStatus | null>,
-  prompt: (message: string, streamingBehavior?: 'steer' | 'followUp', images?: PromptImage[]) =>
-    ipcRenderer.invoke('pi:prompt', message, streamingBehavior, images),
+  prompt: (message: string, streamingBehavior?: 'steer' | 'followUp', images?: PromptImage[], sessionKey?: string) =>
+    ipcRenderer.invoke('pi:prompt', message, streamingBehavior, images, sessionKey),
   abort: () => ipcRenderer.invoke('pi:abort') as Promise<void>,
   newSession: (options) => ipcRenderer.invoke('pi:new-session', options),
   switchSession: (sessionPath: string) => ipcRenderer.invoke('pi:switch-session', sessionPath),
   getMessages: () => ipcRenderer.invoke('pi:get-messages') as Promise<SessionMessages>,
   getSessionStats: () => ipcRenderer.invoke('pi:session-stats'),
-  stopBackgroundTask: (id: string) => ipcRenderer.invoke('engine:stop-background-task', id),
+  stopBackgroundTask: (id: string, sessionKey?: string) => ipcRenderer.invoke('engine:stop-background-task', id, sessionKey),
+  readBackgroundTask: (id: string, sessionKey?: string) => ipcRenderer.invoke('engine:read-background-task', id, sessionKey),
   revealPath: (path: string) => ipcRenderer.invoke('workspace:reveal', path),
   listSessions: () => ipcRenderer.invoke('pi:list-sessions') as Promise<SessionSummary[]>,
   openAgentDir: () => ipcRenderer.invoke('pi:open-agent-dir') as Promise<void>,
@@ -153,6 +154,7 @@ const bridge: PiBridge = {
   openMcpConfig: (which: 'user' | 'project') =>
     ipcRenderer.invoke('mcp:open-config', which) as Promise<void>,
   onAskRequest: (listener) => subscribe('ask:request', listener),
+  listAsks: () => ipcRenderer.invoke('ask:list'),
   onAskCleared: (listener) => subscribe('ask:cleared', listener),
   answerQuestion: (id: string, answers: AskAnswer[]) =>
     ipcRenderer.invoke('ask:answer', id, answers) as Promise<void>,

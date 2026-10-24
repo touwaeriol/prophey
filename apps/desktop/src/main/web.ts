@@ -14,6 +14,7 @@
  * the gateway asks `configure()`'d getters each time.
  */
 import type { WebSearchMode } from '../shared/types'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { getRuntime } from './providers'
 
 export interface WebConfig {
@@ -221,7 +222,7 @@ async function search(
     ? stringArg(args.freshness)
     : undefined
 
-  const provider = runtime.provider()
+  const provider = callerModel.getStore() ? callerModel.getStore()!.provider : runtime.provider()
   let outcome: SearchOutcome
   const route = describeRoute(provider, config)
   const nativeProvider = route.backend === 'native' ? route.provider : undefined
@@ -374,7 +375,9 @@ async function authFor(provider: string): Promise<ProviderAuth> {
 
 /** The session's own model when it belongs to that provider, otherwise that provider's cheapest one. */
 async function modelFor(provider: string): Promise<string | undefined> {
-  if (runtime.provider() === provider && runtime.model()) return runtime.model()
+  const caller = callerModel.getStore()
+  if (caller?.provider === provider && caller.id) return caller.id
+  if (!caller && runtime.provider() === provider && runtime.model()) return runtime.model()
   const modelRuntime = await getRuntime().catch(() => undefined)
   if (!modelRuntime) return undefined
   const models = modelRuntime.getModels(provider)
@@ -937,4 +940,8 @@ function safeCodePoint(value: number): string {
   } catch {
     return ''
   }
+}
+const callerModel = new AsyncLocalStorage<{ provider?: string; id?: string }>()
+export function withWebModel<T>(model: { provider?: string; id?: string }, action: () => T): T {
+  return callerModel.run(model, action)
 }

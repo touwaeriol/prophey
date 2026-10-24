@@ -25,6 +25,7 @@ async function until(probe, label) {
   throw Error('Timed out: ' + label)
 }
 app.on('browser-window-created', (_event, window) => {
+  window.webContents.setBackgroundThrottling(false)
   window.webContents.once('did-finish-load', async () => {
     const evaluate = source => window.webContents.executeJavaScript(source).catch(error => {
       throw Error(`${error.message}\nRenderer script: ${source}`)
@@ -119,6 +120,7 @@ app.on('browser-window-created', (_event, window) => {
       await require('./session-switch-smoke.cjs')(evaluate, until, window)
       await require('./image-copy-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./session-messages-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
+      await require('./session-isolation-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./queue-smoke.cjs')(evaluate, until, window)
       await require('./session-panel-smoke.cjs')(evaluate, until, window)
       await require('./session-title-smoke.cjs')(evaluate, until)
