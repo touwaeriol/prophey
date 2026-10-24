@@ -81,6 +81,30 @@ module.exports = async function checkSessionTitles(evaluate, until) {
     const restored = JSON.stringify(await evaluate('window.pi.getMessages()'))
     for (const text of ['LATE_A_ROUTED', 'PARK_A_DELAY', 'STEER_A_ONLY']) assert(restored.includes(text))
     console.log('Session routing passed: disposed and running sessions receive their own late prompts and steering while B stays unchanged')
+    // A cold pi restore must not cancel a question owned by the visible Prophey session.
+    await evaluate('window.pi.newSession()')
+    await evaluate('window.pi.setEngine("pi")')
+    assert.equal((await evaluate('window.pi.setModel("title-proof", "title-proof")')).ok, true)
+    assert.equal((await evaluate('window.pi.prompt("PI_ORIGIN_TEST")')).ok, true)
+    await until(() => evaluate('window.pi.getStatus().then(s => !s.isStreaming)'), 'pi origin settled')
+    const piOrigin = await evaluate('window.pi.getStatus()')
+    await evaluate('window.pi.openSession(' + JSON.stringify(second.sessionKey) + ', ' + JSON.stringify(second.cwd) + ')')
+    const config = JSON.parse(require('node:fs').readFileSync(require('node:path').join(process.env.PROPHEY_SMOKE_DATA, 'config.json'), 'utf8'))
+    const answer = new Promise((resolve, reject) => {
+      const request = http.request({ host: '127.0.0.1', port: config.mcp.bridgePort, method: 'POST', path: '/ask', headers: { 'x-agent-desktop-token': config.mcp.bridgeToken } }, response => {
+        let body = ''; response.on('data', chunk => { body += chunk }); response.on('end', () => resolve(JSON.parse(body)))
+      })
+      request.on('error', reject)
+      request.end(JSON.stringify({ questions: [{ question: 'Keep B question while A restores' }] }))
+    })
+    await until(() => evaluate('window.pi.listAsks().then(rows => rows.some(r => r.questions[0].question === "Keep B question while A restores"))'), 'B pending question')
+    const question = (await evaluate('window.pi.listAsks()'))[0]
+    assert.equal((await evaluate('window.pi.prompt("PI_LATE_ROUTED", undefined, [], ' + JSON.stringify(piOrigin.sessionKey) + ')')).ok, true)
+    assert.equal((await evaluate('window.pi.getStatus()')).sessionKey, second.sessionKey)
+    assert((await evaluate('window.pi.listAsks()')).some(r => r.id === question.id))
+    await evaluate('window.pi.cancelQuestion(' + JSON.stringify(question.id) + ', "test complete")')
+    assert.equal((await answer).cancelled, true)
+    console.log('Pi routing passed: restoring another engine preserves the visible session question')
     console.log('Session titles passed: isolated requests, once per first prompt, late results stay with their session')
   } finally {
     server.closeAllConnections()

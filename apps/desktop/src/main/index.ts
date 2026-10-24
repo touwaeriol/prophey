@@ -409,7 +409,8 @@ function createEngine(record?: SessionRecord): AgentEngine {
       ...shared,
       prepare: async (workspace) => {
         await applySystemProxy()
-        cancelPendingAsks('pi 已重启', slot.engine.state().sessionFile)
+        const ownerFile = slot.engine.state().sessionFile
+        if (ownerFile) cancelPendingAsks('pi 已重启', ownerFile)
         const launch = await mcpLaunch(workspace, slot.credential)
         // Keep the child process and SDK on the same configuration directory.
         const env = withRealBash({ ...launch.env })
