@@ -184,6 +184,8 @@ async function recordCurrentSession(
       engine: engineId,
       path: file,
       cwd: snapshot.cwd,
+      ...(snapshot.model ? { provider: snapshot.model.provider, model: snapshot.model.id } : {}),
+      ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
       ...(title ? { title } : {}),
       ...(job && !protectedTitle ? { titleSource: job.source } : {}),
       additional: workspace.additional,
@@ -539,6 +541,8 @@ async function rememberParkedSession(slot: EngineSlot): Promise<void> {
     engine: slot.engine.id as EngineId,
     path: file,
     cwd: parked.cwd,
+    ...(slot.status.model ? { provider: slot.status.model.provider, model: slot.status.model.id } : {}),
+    ...(slot.status.thinkingLevel ? { thinkingLevel: slot.status.thinkingLevel } : {}),
     ...(title ? { title } : {}),
     ...(job && !protectedTitle ? { titleSource: job.source } : {}),
     additional: parked.additional,
@@ -1397,7 +1401,9 @@ function statusSnapshot(): PiStatus {
     sessionLocked: conversationStarted,
     sessionName: record?.title || status.sessionName,
     runningSessionKeys: [...running],
-    engine: currentEngineId(),
+    // The engine that is actually on screen, not the creation default: the picker describes this
+    // conversation, and a parked switch could otherwise leave the config pointing elsewhere.
+    engine: (currentEngine.id as EngineId) || currentEngineId(),
     sessionKey: status.sessionFile
       ? toSummaryKey(status.sessionFile)
       : undefined,
@@ -1546,6 +1552,31 @@ async function afterStart(workspace: string, extraArgs: string[]): Promise<void>
     await currentEngine.setThinkingLevel(defaults.thinkingLevel).catch(() => undefined)
   }
   await currentEngine.refresh()
+}
+
+/**
+ * Put a reopened conversation back on the model it was using.
+ *
+ * A CLI engine starts on its own global default; the record remembers the choice instead, so a
+ * conversation that was switched to another model keeps it — and so does every other conversation,
+ * independently. Missing support (model removed, level not offered by this model) is skipped
+ * silently: a stale preference must never block opening the session.
+ */
+async function applySessionPreferences(record: SessionRecord | undefined): Promise<void> {
+  if (!record) return
+  const owner = currentEngine
+  const desired = record.provider && record.model
+    ? { provider: record.provider, id: record.model }
+    : undefined
+  if (desired && (status.model?.provider !== desired.provider || status.model?.id !== desired.id)) {
+    const choices = await owner.models().catch(() => [])
+    if (owner !== currentEngine) return
+    if (choices.some((model) => model.provider === desired.provider && model.id === desired.id))
+      await owner.setModel(desired.provider, desired.id).catch(() => undefined)
+  }
+  if (record.thinkingLevel && status.thinkingLevel !== record.thinkingLevel)
+    await currentEngine.setThinkingLevel(record.thinkingLevel).catch(() => undefined)
+  await currentEngine.refresh().catch(() => undefined)
 }
 
 /** Vendor wording for "this account may not use that processing tier". */
@@ -1762,6 +1793,8 @@ async function activateConversation(options: {
     if (next.phase === 'error' || currentEngine.state().phase !== 'ready') {
       throw new Error(currentEngine.state().error ?? '会话启动失败')
     }
+    // The engine started on its own default model; this conversation's own choice wins.
+    await applySessionPreferences(record)
     await rememberSession({}, true)
     await saveConfig({ pendingEngineSwitch: undefined })
   } catch (error) {
@@ -2772,6 +2805,9 @@ function registerIpc(): void {
         if (!choices.some(model => model.provider === provider && model.id === modelId)) throw new Error('请先在服务商中配置并启用这个模型')
       }
       await currentEngine.setModel(provider, modelId)
+      // Remember it for this conversation: the engines keep one global default, so the choice
+      // would otherwise be lost the next time another session is opened.
+      void rememberSession()
       // A different window means a different 90% point; pi only reads the reserve at startup, so
       // this restarts when (and only when) the number actually changed.
       await syncAutoCompact({ restart: true }).catch(() => undefined)
@@ -2797,6 +2833,7 @@ function registerIpc(): void {
       if (!(await currentEngine.thinkingLevels()).includes(level)) throw new Error('当前模型不支持这个思考等级')
       await currentEngine.setThinkingLevel(level)
       setStatus({ thinkingLevel: level })
+      void rememberSession()
       return { ok: true }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }

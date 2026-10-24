@@ -32,19 +32,92 @@ import type { DraftImage } from './lib/images'
 import { isSubagentRunning } from './lib/subagents'
 
 import type { BtwChat, QueuedMessage } from './lib/chat-types'
+import {
+  adoptComposer,
+  composerFor,
+  composerKey,
+  LOCAL_COMPOSER_KEY,
+  parseComposers,
+  patchComposer,
+  serializeComposers,
+  type SessionComposerMap
+} from './lib/session-composer'
 import { updateStatusText } from './lib/updates'
 import { toChatItems, type ChatItem } from './lib/messages'
 import { applyConversationEvent } from './lib/conversation-events'
+
+/** Draft, images and queue of every conversation, keyed by sidebar session key. */
+const COMPOSER_STORAGE_KEY = 'pi-session-composer'
 
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<PiStatus>({ phase: 'starting', cwd: '' })
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [activePath, setActivePath] = useState<string | undefined>(undefined)
   const [items, setItems] = useState<ChatItem[]>([])
-  const [draft, setDraft] = useState('')
-  const [draftImages, setDraftImages] = useState<DraftImage[]>([])
+  /**
+   * Composer state is per conversation.
+   *
+   * A draft, its pending images and the messages queued behind a running turn all belong to the
+   * session they were typed in: showing them in another session (or flushing a queue into one)
+   * mixed two conversations together. One map keyed by the sidebar identity fixes both — the
+   * derived value below is simply "the active session's composer".
+   */
+  const [composers, setComposers] = useState<SessionComposerMap>(() => {
+    try {
+      return parseComposers(localStorage.getItem(COMPOSER_STORAGE_KEY))
+    } catch {
+      // private mode / storage disabled: start empty rather than fail the window
+      return {}
+    }
+  })
+  /** Session the composer currently belongs to; a ref so async callbacks target the same one. */
+  const composerKeyRef = useRef(LOCAL_COMPOSER_KEY)
+  composerKeyRef.current = composerKey(activePath)
+  const activeComposer = composerFor(composers, composerKeyRef.current)
+  const draft = activeComposer.draft
+  const draftImages = activeComposer.images
   // Messages written while a run is streaming: they wait here and are sent when it settles.
-  const [queued, setQueued] = useState<QueuedMessage[]>([])
+  const queued = activeComposer.queued
+  /** React-shaped setters that only ever touch the active session's composer. */
+  const setDraft = useCallback((next: string | ((previous: string) => string)) => {
+    setComposers((map) =>
+      patchComposer(map, composerKeyRef.current, (previous) => ({
+        draft: typeof next === 'function' ? next(previous.draft) : next
+      }))
+    )
+  }, [])
+  const setDraftImages = useCallback(
+    (next: DraftImage[] | ((previous: DraftImage[]) => DraftImage[])) => {
+      setComposers((map) =>
+        patchComposer(map, composerKeyRef.current, (previous) => ({
+          images: typeof next === 'function' ? next(previous.images) : next
+        }))
+      )
+    },
+    []
+  )
+  const setQueued = useCallback(
+    (next: QueuedMessage[] | ((previous: QueuedMessage[]) => QueuedMessage[])) => {
+      setComposers((map) =>
+        patchComposer(map, composerKeyRef.current, (previous) => ({
+          queued: typeof next === 'function' ? next(previous.queued) : next
+        }))
+      )
+    },
+    []
+  )
+  useEffect(() => {
+    // Keystrokes typed before the window knew its session belong to the session it lands on.
+    if (!activePath) return
+    setComposers((map) => adoptComposer(map, LOCAL_COMPOSER_KEY, composerKey(activePath)))
+  }, [activePath])
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMPOSER_STORAGE_KEY, serializeComposers(composers))
+    } catch {
+      // storage refused the write: the map still lives in memory
+    }
+  }, [composers])
   const [btwChat, setBtwChat] = useState<BtwChat | undefined>(undefined)
   const [btwDraft, setBtwDraft] = useState('')
   const [mcpOpen, setMcpOpen] = useState(false)
@@ -322,8 +395,6 @@ export default function App(): React.JSX.Element {
       setStatus(result)
       setItems([])
       setActivePath(result.sessionKey ?? result.sessionFile)
-      setDraft('')
-      setDraftImages([])
       if (current) setToast(`已在项目「${current.name}」新建会话`)
       await loadSessions()
       } catch (error) { setToast(error instanceof Error ? error.message : String(error)) }
@@ -345,8 +416,6 @@ export default function App(): React.JSX.Element {
       setActiveProjectId(undefined)
       setItems([])
       setActivePath(started.sessionKey ?? started.sessionFile)
-      setDraft('')
-      setDraftImages([])
       setToast('已创建单目录会话')
       await loadSessions()
     }
@@ -357,8 +426,6 @@ export default function App(): React.JSX.Element {
       setStatus(started)
       setActivePath(started.sessionKey ?? started.sessionFile)
       setItems([])
-      setDraft('')
-      setDraftImages([])
       setToast(`已创建项目「${result.project.name}」`)
       await loadSessions()
     }
@@ -617,6 +684,9 @@ export default function App(): React.JSX.Element {
         setToast('先关闭侧边提问窗口')
         return false
       }
+      // The session that asked for the send, captured before any await: a failure has to restore
+      // the text there even if the user switched conversations in the meantime.
+      const owner = composerKeyRef.current
       setStick(true)
       const localId = `local-${Date.now()}`
       setItems((prev) => [
@@ -641,8 +711,7 @@ export default function App(): React.JSX.Element {
       )
       if (!result.ok) {
         setItems((prev) => prev.filter((item) => item.id !== localId))
-        setDraft(text)
-        setDraftImages(images)
+        setComposers((map) => patchComposer(map, owner, { draft: text, images }))
         setToast(result.error ?? '发送失败')
         return false
       }
@@ -668,8 +737,6 @@ export default function App(): React.JSX.Element {
     setItems([])
     const next = await window.pi.getStatus()
     setActivePath(next.sessionKey ?? next.sessionFile)
-    setDraft('')
-    setDraftImages([])
     void loadSessions()
   }, [loadSessions])
 
@@ -833,9 +900,15 @@ export default function App(): React.JSX.Element {
     if (status.isStreaming || status.compacting || status.phase !== 'ready') return
     // The queue belongs to the main session: never flush it into an open `/btw` fork.
     if (btwChatRef.current) return
+    const owner = composerKeyRef.current
     const next = queueRef.current[0]
     if (!next || (next.command && engineCommands.length === 0)) return
-    setQueued((prev) => prev.filter((item) => item.id !== next.id))
+    // The queue is the active session's, so this is a no-op filter for any other session.
+    setComposers((map) =>
+      patchComposer(map, owner, (previous) => ({
+        queued: previous.queued.filter((item) => item.id !== next.id)
+      }))
+    )
     /**
      * Put the item back and arrange the next attempt.
      *
@@ -844,7 +917,13 @@ export default function App(): React.JSX.Element {
      * over. Ask main for its status (the push may have been missed) and retry after a pause.
      */
     const restore = (): void => {
-      setQueued((prev) => (prev.some((item) => item.id === next.id) ? prev : [next, ...prev]))
+      setComposers((map) =>
+        patchComposer(map, owner, (previous) => ({
+          queued: previous.queued.some((item) => item.id === next.id)
+            ? previous.queued
+            : [next, ...previous.queued]
+        }))
+      )
       void window.pi.getStatus().then(setStatus)
       window.setTimeout(() => setQueueTick((value) => value + 1), 2000)
     }
@@ -987,8 +1066,6 @@ export default function App(): React.JSX.Element {
     setActiveProjectId(undefined)
     setActivePath(next.sessionKey ?? next.sessionFile)
     setItems([])
-    setDraft('')
-    setDraftImages([])
     setStick(true)
     setToast(`已在 ${next.cwd} 新建会话`)
     await loadProjects()
@@ -1003,8 +1080,6 @@ export default function App(): React.JSX.Element {
     setActiveProjectId(undefined)
     setActivePath(next.sessionKey ?? next.sessionFile)
     setItems([])
-    setDraft('')
-    setDraftImages([])
     setStick(true)
     setToast(`已在 ${cwd} 新建会话`)
     await loadProjects()

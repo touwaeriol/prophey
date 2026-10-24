@@ -31,6 +31,16 @@ export interface SessionRecord {
   projectId?: string
   title: string
   titleSource?: 'prompt' | 'generated' | 'manual'
+  /**
+   * The model and thinking level this conversation last ran with.
+   *
+   * The CLIs keep one global default model, so without this a conversation switched to another
+   * model came back on the default after visiting a different session — a per-session choice that
+   * behaved like a window-wide one.
+   */
+  provider?: string
+  model?: string
+  thinkingLevel?: string
   createdAt: number
   updatedAt: number
 }
@@ -62,6 +72,11 @@ function readRecord(value: unknown): SessionRecord | undefined {
     title: typeof raw.title === 'string' ? raw.title : '',
     titleSource: ['prompt', 'generated', 'manual'].includes(String(raw.titleSource))
       ? raw.titleSource as SessionRecord['titleSource'] : undefined,
+    ...(typeof raw.provider === 'string' && raw.provider ? { provider: raw.provider } : {}),
+    ...(typeof raw.model === 'string' && raw.model ? { model: raw.model } : {}),
+    ...(typeof raw.thinkingLevel === 'string' && raw.thinkingLevel
+      ? { thinkingLevel: raw.thinkingLevel }
+      : {}),
     createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : 0,
     updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0
   }
@@ -154,6 +169,13 @@ export class SessionStore {
         : {}),
       title: patch.title || existing?.title || '',
       titleSource: patch.titleSource ?? existing?.titleSource,
+      ...((patch.provider ?? existing?.provider)
+        ? { provider: patch.provider ?? existing?.provider }
+        : {}),
+      ...((patch.model ?? existing?.model) ? { model: patch.model ?? existing?.model } : {}),
+      ...((patch.thinkingLevel ?? existing?.thinkingLevel)
+        ? { thinkingLevel: patch.thinkingLevel ?? existing?.thinkingLevel }
+        : {}),
       createdAt: patch.createdAt ?? existing?.createdAt ?? now,
       updatedAt: patch.updatedAt ?? now
     }

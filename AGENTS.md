@@ -132,7 +132,9 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 ## 消息队列
 
 - 运行中（`status.isStreaming` 或 `status.compacting`）发消息**默认是引导（steer）**：`Enter` 直接把这条消息插进当前回合，`Ctrl+Enter` 才是**加入队列**（等本轮结束后自动发送）。空闲时两者都是发送。2026-10 之前是反的（Enter 排队、Ctrl+Enter 强制引导），被用户否掉了——「发送就该发送，不想被打断时才按 Ctrl」。
-- 队列在渲染层（`App.tsx` 的 `queued`），渲染在**输入框外面**（`.composer-wrap > .queue-panel`，不是 `.composer` 里）：输入框本身的边界不被队列改动。每条可编辑（放回输入框）、删除，非命令条目还有「引导」按钮（`.queue-steer`）——排队后想立刻插进当前回合就点它（走 `prompt(text, 'steer')`）。布局上的 `max-width: 860px; margin: 0 auto` 要和 `.composer` 对齐。
+- **输入框、待发图片和队列都是会话独享的**：三者一起存在 `lib/session-composer.ts` 的那张表里（`SessionComposerMap`，键 = 侧边栏会话 key，落在 `localStorage: pi-session-composer`）。`App.tsx` 只把当前会话那一条取出来当 `draft` / `draftImages` / `queued` 用，setter 也只改当前会话；切换会话不清理输入框（清的是"别人的"，以前正是这样丢草的），失败回填和 flush 用**入队时捕获的 key**（`composerKeyRef` / `owner`），异步返回时用户已经切走也不会写错会话。启动阶段还没有 session key 时落到 `local`，会话到位后由 `adoptComposer` 迁过去。
+- 模型和思考等级同样跟会话走：写进 `SessionRecord`（`sessions.json` 的 `provider` / `model` / `thinkingLevel`），重开会话时 `applySessionPreferences()` 覆盖引擎自己的全局默认值——CLI 引擎只有一个全局默认模型，不这么做会出现"在 A 改了模型，回 B 又变成 A 的"。
+- 队列渲染在**输入框外面**（`.composer-wrap > .queue-panel`，不是 `.composer` 里）：输入框本身的边界不被队列改动。每条可编辑（放回输入框）、删除，非命令条目还有「引导」按钮（`.queue-steer`）——排队后想立刻插进当前回合就点它（走 `prompt(text, 'steer')`）。布局上的 `max-width: 860px; margin: 0 auto` 要和 `.composer` 对齐。
 - 回合结束后自动按顺序发送队列里的下一条。**flush 的 effect 只能依赖 `status.isStreaming` / `status.compacting` / `status.phase`，不能依赖 `queued`**——否则加入第二条时会和第一条抢跑（`isStreaming` 还没变 true 就再发一次），实测第二条会被 pi 拒绝并丢失。
 - 发送失败时把该条放回队首并提示，避免静默丢消息。放回后必须**自己再排一次**（`restore()` 重新读 `pi:get-status` 并 2 秒后 `setQueueTick`）：条目出队又回队不产生任何状态变化，flush 不会重跑，否则排队项会永远躺在那里。
 
