@@ -204,11 +204,11 @@ test('Prophey side chats propagate prompt errors and delete forks through transc
   engine.options.autoCompact = () => ({ enabled: true, percent: 0.1 })
   engine.model = { contextWindow: 1_000_000 }
   const transcript = [{ role: 'user', content: '' }]
-  const overhead = JSON.stringify(transcript[0]).length
-  transcript[0].content = 'x'.repeat(3996 - overhead)
+  // The estimator counts what a message sends (its text), not the JSON around it: ~4 characters a token.
+  transcript[0].content = 'x'.repeat(3996)
   engine.transcript = transcript
   assert.equal(engine.shouldCompact(), false, '999 tokens must remain below the 1000-token threshold')
-  transcript[0].content = 'x'.repeat(4000 - overhead)
+  transcript[0].content = 'x'.repeat(4000)
   assert.equal(engine.shouldCompact(), true, '0.1% of 1M must compact at 1000 tokens')
   engine.sessionId = 'original'
   engine.prompt = async () => ({ ok: false, error: 'provider unavailable' })

@@ -6,7 +6,7 @@ import { guardedStream } from './stream-guard'
 import type { EngineStartOptions } from './engine'
 import { engineCapabilities } from '../../shared/engine'
 import type { Model, ThinkingLevel } from '@earendil-works/pi-ai'
-import type { PiModel, PiStatus, PromptImage, PromptResult } from '@shared/types'
+import type { PiModel, PiStatus, PromptImage, PromptResult, SessionStats } from '@shared/types'
 import * as providers from '../providers'
 import * as speed from '../speed'
 import type { TranscriptStore, StoredTranscript } from '../transcript-store'
@@ -44,6 +44,19 @@ export class PropheyEngine implements AgentEngine {
   private lastAbortAt = 0
   private levels: string[] = []
   private restoring = false
+  /**
+   * Prompt size the provider reported for the newest request, plus how much transcript it covered.
+   *
+   * This is the only honest number for the meter: it already includes the system prompt, the tool
+   * declarations and every message, which an estimate over the transcript alone cannot know.
+   */
+  private usage?: { tokens: number; index: number }
+  /** Usage of the round in flight, read from each stream event's partial message. */
+  private live?: { prompt: number; output: number; message?: Record<string, unknown> }
+  /** System prompt + tool declarations: sent with every request, invisible in the transcript. */
+  private promptTokens = 0
+  /** Last push of the meter to the window; streaming would otherwise broadcast per token. */
+  private publishedAt = 0
 
   constructor(
     private readonly options: {
@@ -142,6 +155,7 @@ export class PropheyEngine implements AgentEngine {
     else await this.resume()
     if (options.model) await this.setModel(options.model.provider, options.model.id).catch(() => undefined)
     this.setStatus({ sessionFile: this.transcriptPath() })
+    this.publishUsage(true)
     return this.snapshot
   }
 
@@ -277,25 +291,65 @@ export class PropheyEngine implements AgentEngine {
   }
 
   /**
-   * Usage as far as we can tell it.
+   * What the conversation occupies right now.
    *
-   * The provider reports usage per response, but the transcript is what fills the window, so the
-   * number that matters for the meter is an estimate of the whole conversation (~4 characters per
-   * token, which is close enough for a percentage and never blocks on a round trip).
+   * Measured first: the newest response's own prompt+output count covers everything that was sent
+   * (system prompt, tool declarations, transcript), so the meter starts there and adds whatever was
+   * appended since — including the reply being streamed, which is why the ring moves mid-round.
+   * Only a session that has never had a response has to be estimated.
    */
-  async stats(): Promise<{
-    tokens?: { input?: number; output?: number; total?: number }
-    contextUsage?: { tokens?: number | null; contextWindow?: number; percent?: number | null }
-  }> {
-    const tokens = estimateTokens(this.transcript)
+  private contextTokens(): number {
+    const live = this.live
+    const streaming = live ? Math.max(live.output, live.message ? estimateTokens([live.message]) : 0) : 0
+    if (live && live.prompt > 0) return live.prompt + streaming
+    const measured = this.usage
+    const appended = measured
+      ? estimateTokens(this.transcript.slice(measured.index))
+      : estimateTokens(this.transcript) + this.promptTokens
+    return (measured?.tokens ?? 0) + appended + streaming
+  }
+
+  private usageSnapshot(): NonNullable<SessionStats['contextUsage']> {
+    const tokens = Math.max(0, Math.round(this.contextTokens()))
     const contextWindow = this.model?.contextWindow
     return {
-      tokens: { input: tokens, output: 0, total: tokens },
-      contextUsage: {
-        tokens,
-        contextWindow,
-        percent: contextWindow ? Math.min(100, (tokens / contextWindow) * 100) : null
-      }
+      tokens,
+      contextWindow,
+      percent: contextWindow ? Math.min(100, (tokens / contextWindow) * 100) : null
+    }
+  }
+
+  /**
+   * Push the meter while a round is still streaming.
+   *
+   * Throttled to a change worth a repaint (1% of the window, or a second of silence), because the
+   * window would otherwise re-render for every token.
+   */
+  private publishUsage(force = false): void {
+    const usage = this.usageSnapshot()
+    const last = this.snapshot.contextUsage?.tokens ?? 0
+    const window = this.model?.contextWindow ?? 0
+    const now = Date.now()
+    if (!force && now - this.publishedAt < 400 && Math.abs((usage.tokens ?? 0) - last) < Math.max(1000, window / 100)) {
+      return
+    }
+    this.publishedAt = now
+    this.setStatus({ contextUsage: usage })
+  }
+
+  /** The transcript was replaced, so the measured prompt no longer describes it. */
+  private resetUsage(): void {
+    this.usage = undefined
+    this.live = undefined
+    this.promptTokens = 0
+    if (this.snapshot.contextUsage) this.setStatus({ contextUsage: undefined })
+  }
+
+  async stats(): Promise<SessionStats> {
+    const usage = this.usageSnapshot()
+    return {
+      tokens: { input: usage.tokens ?? 0, output: this.live?.output ?? 0, total: usage.tokens ?? 0 },
+      contextUsage: usage
     }
   }
 
@@ -376,6 +430,7 @@ ${text.trim()}`,
           timestamp: Date.now()
         }
       ]
+      this.resetUsage()
       this.persist()
       this.options.onEvent({ type: 'compaction_end', summary: text.trim() })
       return { summary: text.trim() }
@@ -392,6 +447,7 @@ ${text.trim()}`,
   async newSession(): Promise<{ cancelled?: boolean }> {
     this.tools = undefined
     this.transcript = []
+    this.resetUsage()
     // A new session means a new transcript file; the app owns the id so it can persist it.
     this.sessionId =
       (await this.options.newSessionId?.()) ?? this.options.sessionId?.() ?? this.sessionId
@@ -433,6 +489,7 @@ ${text.trim()}`,
     this.tools = undefined
     if (stored.workspace.primary) this.roots = stored.workspace
     this.transcript = stored.messages
+    this.resetUsage()
     await this.restorePreferences(stored)
     this.setStatus({ sessionFile: this.transcriptPath() })
     for (const message of this.transcript) {
@@ -465,12 +522,14 @@ ${text.trim()}`,
   }
   // --- the turn --------------------------------------------------------------------------------
 
-  /** True when auto-compaction is on and the transcript is past the trigger point. */
+  /** True when auto-compaction is on and the context is past the trigger point. */
   private shouldCompact(): boolean {
     this.autoCompact = this.options.autoCompact?.() ?? this.autoCompact
     const window = this.model?.contextWindow
     if (!this.autoCompact.enabled || !window || this.transcript.length === 0) return false
-    return estimateTokens(this.transcript) >= (window * this.autoCompact.percent) / 100
+    // The trigger has to describe the next request (prompt + tools + transcript), not just the
+    // transcript: 40K tokens of tool declarations fill the window whatever the conversation holds.
+    return this.contextTokens() >= (window * this.autoCompact.percent) / 100
   }
 
   /** First configured model, published to the status so the window shows it. */
@@ -496,6 +555,7 @@ ${text.trim()}`,
     const stored = await store.load(this.sessionId).catch(() => undefined)
     if (!stored) return
     this.transcript = stored.messages
+    this.resetUsage()
     await this.restorePreferences(stored)
     // The window draws the transcript from the engine, so it has to hear about the restored one.
     for (const message of this.transcript) {
@@ -602,19 +662,30 @@ ${text.trim()}`,
     return this.tools
   }
 
+  /**
+   * The directory list goes into the prompt instead of costing a `workspace_roots` round trip: the
+   * model needs the names anyway to fill `root` on every call, so spelling them out saves a turn
+   * and keeps the same names the tools resolve.
+   */
   private systemPrompt(): string {
-    const roots = [
-      `主目录：${this.roots.primary}`,
-      ...this.roots.additional.map((root) => `附加目录：${root}`)
+    const all = [
+      { name: basename(this.roots.primary), path: this.roots.primary, primary: true },
+      ...this.roots.additional.map((root) => ({ name: basename(root), path: root, primary: false }))
     ]
+    const workspace = all.length > 1
+      ? [
+          '工作目录（工具的 `root` 参数取这些目录名，不传就是主目录；路径相对该目录解析）：',
+          ...all.map((root) => `- ${root.name}${root.primary ? '（主目录）' : ''}  ${root.path}`)
+        ].join('\n')
+      : `工作目录：${all[0].path}（单目录会话，工具不需要 root 参数；路径相对它解析）`
     return [
       '你是 Prophey 内置引擎的助手。',
-      '工具都带 `root` 参数（目录名），路径相对该目录；越界会被拒绝。用 workspace_roots 查目录名。',
+      workspace,
+      '越界（`..`、绝对路径、符号出根）会被拒绝；目录清单已在上方列出，不必再调用 workspace_roots。',
       '改文件前先读，改完再读回确认；命令用 run_bash 并指明目录。',
       '长命令会后台执行，输出写入日志。完成通知不包含完整输出；需要时用 read_bash_task 的游标增量读取，避免重复读取日志。任务需要命令结果时，应等待完成后再下结论。',
-      this.options.appendSystemPrompt ?? '',
-      ...roots
-    ].join('\n')
+      this.options.appendSystemPrompt ?? ''
+    ].filter(line => line !== '').join('\n')
   }
 
   notify(text: string, wake: boolean): void {
@@ -733,6 +804,8 @@ ${text.trim()}`,
           signal.throwIfAborted()
           this.transcript.push(await this.runTool(call, tools))
           this.persist()
+          // A tool result goes into the next prompt, so the context really did grow.
+          this.publishUsage(true)
         }
       }
       return { ok: true, disposition: 'started' }
@@ -823,14 +896,21 @@ ${text.trim()}`,
           }
     this.options.onEvent({ type: 'message_start', message: { role: 'assistant' } })
     this.setStatus({ activity: { label: '正在等待模型回复', since: Date.now() } })
+    // Everything the request carries beyond the transcript, so the meter is already right while the
+    // model is thinking instead of showing the pre-round number for the whole wait.
+    const systemPrompt = this.systemPrompt()
+    const declarations = toolDeclarations(tools)
+    this.promptTokens = Math.ceil(systemPrompt.length / 4) + Math.ceil(JSON.stringify(declarations).length / 4)
+    this.live = undefined
+    this.publishUsage(true)
     const stream = guardedStream<Record<string, unknown>>(signal => runtime.streamSimple(
       model,
       {
-        systemPrompt: this.systemPrompt(),
+        systemPrompt,
         // Keep the original provider metadata/signatures untouched. The same pi SDK adapters
         // translate this copy into the target model's protocol at request time.
         messages: structuredClone(this.transcript) as never,
-        tools: toolDeclarations(tools)
+        tools: declarations
       },
       { ...fastOptions, signal,
         reasoning: this.snapshot.thinkingLevel === 'off' ? undefined : this.snapshot.thinkingLevel as ThinkingLevel | undefined }
@@ -839,6 +919,13 @@ ${text.trim()}`,
     let completed = false
     let received = false
     for await (const event of stream as AsyncIterable<Record<string, unknown>>) {
+      // Providers attach their token counts to every partial message (Anthropic at the start,
+      // OpenAI with the final chunk), so reading them here is what makes the meter live.
+      const reported = usageOf((event.partial ?? event.message) as Record<string, unknown> | undefined)
+      if (reported) {
+        this.live = { ...reported, message: (event.partial ?? event.message) as Record<string, unknown> }
+        this.publishUsage()
+      }
       if (
         event.type === 'text_delta' ||
         event.type === 'thinking_delta' ||
@@ -857,6 +944,7 @@ ${text.trim()}`,
         })
       }
       if (event.type === 'error') {
+        this.live = undefined
         return { ok: false, error: describeError(event.error) }
       }
       if (event.type === 'done' && event.message) {
@@ -864,11 +952,23 @@ ${text.trim()}`,
         partial = event.message as Record<string, unknown>
       }
     }
-    if (!completed || !partial) return { ok: false, error: '模型流提前关闭，没有完整回复' }
-    if (!textOf(partial).trim() && toolCallsOf(partial).length === 0) return { ok: false, error: '模型返回了空回复，请检查模型配置后重试' }
+    if (!completed || !partial) {
+      this.live = undefined
+      return { ok: false, error: '模型流提前关闭，没有完整回复' }
+    }
+    if (!textOf(partial).trim() && toolCallsOf(partial).length === 0) {
+      this.live = undefined
+      return { ok: false, error: '模型返回了空回复，请检查模型配置后重试' }
+    }
     const message = { ...partial, api: partial.api ?? model.api,
       provider: partial.provider ?? model.provider, model: partial.model ?? model.id }
     this.transcript.push(message)
+    // The response's own usage covers everything sent plus the reply, which is exactly the context
+    // the next request starts from.
+    const usage = usageOf(message)
+    this.usage = { tokens: usage ? usage.prompt + usage.output : this.contextTokens(), index: this.transcript.length }
+    this.live = undefined
+    this.publishUsage(true)
     this.options.onEvent({ type: 'message_end', message })
     this.persist()
     return { ok: true, message }
@@ -918,12 +1018,53 @@ ${text.trim()}`,
 
 }
 
-/** Rough token count of the transcript; good enough for a meter and a compaction trigger. */
+/**
+ * Prompt and output tokens a provider reported for a response.
+ *
+ * `input` excludes the cached parts of the prompt (that is how pi normalises every provider), so
+ * the prompt is the sum of the three input fields.
+ */
+function usageOf(
+  message: Record<string, unknown> | undefined
+): { prompt: number; output: number } | undefined {
+  const usage = message?.usage as Record<string, unknown> | undefined
+  if (!usage || typeof usage !== 'object') return undefined
+  const count = (value: unknown): number =>
+    typeof value === 'number' && Number.isFinite(value) ? value : 0
+  const prompt = count(usage.input) + count(usage.cacheRead) + count(usage.cacheWrite)
+  const output = count(usage.output)
+  if (prompt === 0 && output === 0) return undefined
+  return { prompt, output }
+}
+
+/**
+ * Characters of what a message actually sends: text, thinking and tool arguments.
+ *
+ * Counting the serialised message instead would charge the model for JSON field names and quoting,
+ * which is where estimates drift furthest from the provider's own count.
+ */
+function messageCharacters(message: Record<string, unknown>): number {
+  const raw = message.content
+  const blocks = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? [{ type: 'text', text: raw }]
+      : []
+  let characters = 0
+  for (const block of blocks) {
+    if (!block || typeof block !== 'object') continue
+    const fields = block as Record<string, unknown>
+    if (typeof fields.text === 'string') characters += fields.text.length
+    if (typeof fields.thinking === 'string') characters += fields.thinking.length
+    if (fields.arguments !== undefined && fields.arguments !== null) characters += JSON.stringify(fields.arguments).length
+  }
+  return characters
+}
+
+/** Rough token count of messages; ~4 characters per token is close enough for a meter. */
 function estimateTokens(messages: Array<Record<string, unknown>>): number {
   let characters = 0
-  for (const message of messages) {
-    characters += JSON.stringify(message).length
-  }
+  for (const message of messages) characters += messageCharacters(message)
   return Math.ceil(characters / 4)
 }
 

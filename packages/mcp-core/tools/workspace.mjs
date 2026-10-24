@@ -118,8 +118,8 @@ export const readFile = {
   title: 'Read a file in a workspace directory',
   description:
     'Read a text file from one of the workspace directories. `path` is relative to `root` (the ' +
-    'directory name from workspace_roots); omit `root` for the primary directory. Paths that would ' +
-    'escape the directory are refused.',
+    'directory name listed in the workspace section of the prompt); omit `root` for the primary ' +
+    'directory. Paths that would escape the directory are refused.',
   inputSchema: {
     type: 'object',
     properties: {

@@ -667,6 +667,20 @@ export default function App(): React.JSX.Element {
     }
   }, [status.phase, status.sessionKey, status.sessionFile, status.autoCompactPercent, status.model?.id, status.model?.contextWindow])
 
+  /**
+   * Prophey measures its own usage and publishes it while a round streams, so the ring moves during
+   * the run instead of jumping at `agent_settled`. Other engines leave `status.contextUsage` unset
+   * and the meter keeps coming from `get_session_stats`.
+   */
+  useEffect(() => {
+    const usage = status.contextUsage
+    if (!usage) return
+    setContextUsage(usage)
+    setRun((prev) =>
+      prev.startedAt && !prev.endedAt ? { ...prev, tokens: usage.tokens ?? prev.tokens } : prev
+    )
+  }, [status.contextUsage])
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('pi-desktop-theme', theme)

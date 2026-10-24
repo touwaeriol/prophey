@@ -53,6 +53,11 @@ export interface PiStatus {
   compacting?: boolean;
   /** Percentage of the window at which auto-compaction starts; absent when it is off. */
   autoCompactPercent?: number;
+  /**
+   * Context the engine measured for this session. Prophey publishes it while a round streams (the
+   * ring has to move before the round ends); the other engines leave it to `get_session_stats`.
+   */
+  contextUsage?: ContextUsage;
   /** The repository the active session works on (a session is scoped to one repo). */
   repo?: RepoInfo;
   /** Processing tier of the next request, plus what the active model supports. */
@@ -135,11 +140,17 @@ export interface SessionStats {
   sessionKey?: string;
   tokens?: { input?: number; output?: number; total?: number };
   cost?: number;
-  contextUsage?: {
-    tokens?: number | null;
-    contextWindow?: number;
-    percent?: number | null;
-  };
+  contextUsage?: ContextUsage;
+}
+
+/**
+ * How full the active model's context is. `tokens` is the whole request (system prompt, tool
+ * declarations, transcript and the reply so far), not just the conversation text.
+ */
+export interface ContextUsage {
+  tokens?: number | null;
+  contextWindow?: number;
+  percent?: number | null;
 }
 
 export interface SessionMessages {
