@@ -27,5 +27,16 @@ child.on('error', error => { console.error(error); process.exitCode = 1 })
 child.on('close', code => {
   clearTimeout(timer)
   fs.rmSync(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
-  process.exitCode = code === 0 && output.includes('Electron smoke passed:') ? 0 : 1
+  const passed = code === 0 && output.includes('Electron smoke passed:')
+  if (!passed) {
+    // CI logs need a token to read; an annotation and the step summary are visible on the public run.
+    const tail = output.trim().split(/\r?\n/).slice(-25).join('\n')
+    const escaped = tail.replace(/%/g, '%25').replace(/\r/g, '').replace(/\n/g, '%0A')
+    console.log(`::error title=Electron smoke failed::${escaped}`)
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+        `### Electron smoke failed (exit ${code})\n\n\`\`\`\n${tail}\n\`\`\`\n`)
+    }
+  }
+  process.exitCode = passed ? 0 : 1
 })

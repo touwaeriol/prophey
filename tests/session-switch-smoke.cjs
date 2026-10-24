@@ -30,7 +30,5 @@ module.exports = async function sessionSwitchSmoke(evaluate, until, window) {
     'a streaming turn must not block (or be stopped by) switching sessions'
   )
 
-  // Restore the idle status for the tests that follow.
-  window.webContents.send('pi:status', idle)
   console.log('Session switch passed: a new session opens without stopping the previous turn')
 }
