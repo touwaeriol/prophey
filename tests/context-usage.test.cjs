@@ -1,6 +1,7 @@
 const { test, after } = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+const http = require('node:http')
 const path = require('node:path')
 const os = require('node:os')
 const esbuild = require('esbuild')
@@ -130,5 +131,57 @@ test('without mid-round usage the meter estimates, and that estimate covers prom
 
     // Once the provider answers, its count replaces the guess.
     assert.equal((await engine.stats()).contextUsage.tokens, 1300)
+    const breakdown = (await engine.stats()).contextUsage.breakdown
+    assert.equal(breakdown.systemTools.count > 0, true, 'the app tool declarations are counted')
+    assert.equal(breakdown.systemTools.tokens > 0, true)
+    assert.equal(breakdown.systemPrompt > 0, true, 'the system prompt is counted')
+    assert.equal(breakdown.mcpTools.count, 0, 'no MCP server in this session')
+    // The sections are the meter: the transcript is the remainder, so nothing is lost or invented.
+    assert.equal(
+      breakdown.messages + breakdown.systemPrompt + breakdown.systemTools.tokens + breakdown.mcpTools.tokens,
+      1300
+    )
   } finally { engine.dispose() }
+})
+
+test('the breakdown splits the prompt between the app tools and each MCP server', async () => {
+  const server = http.createServer((request, response) => {
+    let body = ''
+    request.on('data', (chunk) => (body += chunk))
+    request.on('end', () => {
+      const call = JSON.parse(body || '{}')
+      const result = call.method === 'tools/list'
+        ? { result: { tools: [
+            { name: 'search', description: 'search the graph', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } },
+            { name: 'impact', description: 'what changing a symbol breaks', inputSchema: { type: 'object', properties: {} } }
+          ] } }
+        : { result: { protocolVersion: '2025-06-18' } }
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, ...result }))
+    })
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  const engine = new quiet({ onStatus() {}, onEvent() {}, onSettled() {},
+    toolModulePath: toolsPath,
+    mcpEndpoints: async () => [{ name: 'graph', url: `http://127.0.0.1:${address.port}/mcp/graph`, token: 'proof' }] })
+  try {
+    await engine.start(temp, { model: { provider: 'mock', id: 'metered' } })
+    assert.equal((await engine.toolSet()).filter((tool) => tool.name.startsWith('graph__')).length, 2)
+    assert.equal((await engine.prompt('hello')).ok, true)
+    const usage = (await engine.stats()).contextUsage
+    const breakdown = usage.breakdown
+    assert.equal(breakdown.mcpTools.count, 2)
+    assert.deepEqual(breakdown.mcpTools.servers.map((server) => server.name), ['graph'])
+    assert.equal(breakdown.mcpTools.tokens > 0, true, 'the MCP declarations have a price')
+    assert.equal(breakdown.systemTools.count > 0, true, 'the app tools are a separate section')
+    assert.equal(
+      breakdown.messages + breakdown.systemPrompt + breakdown.systemTools.tokens + breakdown.mcpTools.tokens,
+      usage.tokens,
+      'sections add up to the meter'
+    )
+  } finally {
+    engine.dispose()
+    server.close()
+  }
 })

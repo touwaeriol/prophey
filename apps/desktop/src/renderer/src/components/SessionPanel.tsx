@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { engineLabel } from '@shared/engine'
-import type { McpEngineState, McpServerInfo, McpState, PiStatus, SubagentView } from '@shared/types'
+import type {
+  ContextUsage,
+  McpEngineState,
+  McpServerInfo,
+  McpState,
+  PiStatus,
+  SubagentView
+} from '@shared/types'
 import { isSubagentRunning } from '../lib/subagents'
 import { composerKey } from '../lib/session-composer'
 import type { ChatItem } from '../lib/messages'
@@ -18,13 +25,28 @@ import {
 } from './Icons'
 
 /**
- * Session panel: the right-hand inspector modelled on Claude Desktop's.
+ * Session panel: the right-hand inspector, laid out like Claude Code's.
  *
- * Five cards, each backed by data the app already owns — environment from `PiStatus`, context from
- * `get_session_stats` (aggregate tokens only: pi does not expose Claude's per-section split, so the
- * card shows what is real and does not invent categories), connectors from `get_mcp_state`, outputs
- * derived from the transcript's write/edit calls, and background tasks from `PiStatus`.
+ * Every card is a single row with the value that matters when it is folded (`Environment › sup2api`,
+ * `Context › 28%`, `Connectors › 1 to reconnect`, …), so the whole panel reads at a glance and only
+ * the card being looked at is expanded. Which cards are open is remembered in localStorage; the
+ * panel's own open state belongs to the window (`pi-session-panel`).
+ *
+ * Data comes from what the app already owns: environment from `PiStatus`, context from the engine's
+ * measured usage (with a per-section breakdown when the engine builds the request itself), connectors
+ * from `get_mcp_state`, outputs from the transcript's write/edit calls, tasks from `PiStatus`.
  */
+
+const EXPANDED_KEY = 'pi-session-panel-cards'
+
+function loadExpanded(): Record<string, boolean> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? '{}') as unknown
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, boolean>) : {}
+  } catch {
+    return {}
+  }
+}
 
 function formatTokens(value?: number | null): string {
   if (!value || value < 0) return '0'
@@ -34,6 +56,14 @@ function formatTokens(value?: number | null): string {
     return `${thousands >= 100 ? Math.round(thousands) : thousands.toFixed(1)}K`
   }
   return String(Math.round(value))
+}
+
+/** `23.3%` for the small sections, `28%` once a whole percent is enough. */
+function percentOf(tokens: number, total: number): string {
+  if (!total) return '—'
+  const percent = (tokens / total) * 100
+  if (percent >= 10 || percent === 0) return `${Math.round(percent)}%`
+  return `${percent.toFixed(1)}%`
 }
 
 function formatElapsed(ms: number): string {
@@ -46,44 +76,62 @@ function formatElapsed(ms: number): string {
 
 function PanelCard({
   title,
-  collapsed,
+  summary,
+  expanded,
   onToggle,
   children
 }: {
   title: string
-  collapsed: boolean
+  summary?: ReactNode
+  expanded: boolean
   onToggle: () => void
   children: ReactNode
 }) {
   return (
-    <section className={`panel-card ${collapsed ? 'collapsed' : ''}`}>
+    <section className={`panel-card ${expanded ? 'expanded' : 'collapsed'}`}>
       <header className="panel-card-head">
-        <button className="panel-card-toggle" onClick={onToggle} title={collapsed ? '展开' : '收起'}>
-          <span>{title}</span>
+        <button className="panel-card-toggle" onClick={onToggle} title={expanded ? '收起' : '展开'}>
+          <span className="panel-card-title">{title}</span>
+          {summary !== undefined && summary !== null && (
+            <span className="panel-card-summary">{summary}</span>
+          )}
           <ChevronIcon size={12} />
         </button>
       </header>
-      {!collapsed && <div className="panel-card-body">{children}</div>}
+      {expanded && <div className="panel-card-body">{children}</div>}
     </section>
   )
 }
 
-function ContextMeter({
-  used,
-  buffer,
-  window
-}: {
-  used: number
-  buffer: number
-  window: number
-}) {
-  const width = window > 0 ? window : Math.max(1, used + buffer)
-  const usedPercent = Math.min(100, (used / width) * 100)
-  const bufferPercent = Math.min(100 - usedPercent, (buffer / width) * 100)
+interface MeterSegment {
+  key: string
+  label: string
+  tokens: number
+  tone: string
+  /** Keep the row visible at 0 tokens; the bar itself never draws an empty segment. */
+  always?: boolean
+}
+
+/**
+ * The request, drawn as Claude Code draws it: one stacked bar over the whole window, with the
+ * autocompaction reserve and the unused space as segments of their own.
+ */
+function ContextMeter({ segments, total }: { segments: MeterSegment[]; total: number }) {
+  const width = total > 0 ? total : Math.max(1, segments.reduce((sum, s) => sum + s.tokens, 0))
   return (
-    <div className="panel-meter" title={`已用 ${formatTokens(used)} · 缓冲 ${formatTokens(buffer)} · 窗口 ${formatTokens(width)}`}>
-      <span className="panel-meter-used" style={{ width: `${usedPercent}%` }} />
-      <span className="panel-meter-buffer" style={{ width: `${bufferPercent}%` }} />
+    <div
+      className="panel-meter"
+      title={segments.map((s) => `${s.label} ${formatTokens(s.tokens)}`).join(' · ')}
+    >
+      {segments
+        .filter((segment) => segment.tokens > 0)
+        .map((segment) => (
+          <span
+            key={segment.key}
+            className={`panel-meter-seg ${segment.tone}`}
+            style={{ width: `${Math.min(100, (segment.tokens / width) * 100)}%` }}
+          />
+        ))}
     </div>
   )
 }
@@ -101,7 +149,7 @@ export function SessionPanel({
   onNotice
 }: {
   status: PiStatus
-  contextUsage?: { tokens?: number | null; contextWindow?: number; percent?: number | null }
+  contextUsage?: ContextUsage
   additional?: string[]
   mcp?: McpState
   items: ChatItem[]
@@ -111,13 +159,17 @@ export function SessionPanel({
   onOpenSettings: (tab: 'providers' | 'mcp' | 'general') => void
   onNotice: (text: string | null) => void
 }) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(loadExpanded)
   const [showAllOutputs, setShowAllOutputs] = useState(false)
+  const [showMcpTools, setShowMcpTools] = useState(false)
   const [busy, setBusy] = useState<string | undefined>(undefined)
   const [selectedTask, setSelectedTask] = useState<string>()
   const [taskOutput, setTaskOutput] = useState('')
   const [showFinished, setShowFinished] = useState(false)
   const owner = composerKey(status.sessionKey ?? status.sessionFile)
+  useEffect(() => {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify(expanded))
+  }, [expanded])
   useEffect(() => {
     if (!selectedTask) return
     let cancelled = false
@@ -140,8 +192,9 @@ export function SessionPanel({
     return () => clearInterval(timer)
   }, [backgroundTasks.length])
 
+  const isOpen = (key: string): boolean => expanded[key] === true
   const toggle = (key: string): void =>
-    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
 
   const outputs = useMemo(() => sessionOutputs(items, status.cwd), [items, status.cwd])
   const visibleOutputs = showAllOutputs ? outputs : outputs.slice(0, 5)
@@ -154,7 +207,7 @@ export function SessionPanel({
       ? Math.round((windowTokens * status.autoCompactPercent) / 100)
       : windowTokens
   const buffer = Math.max(0, windowTokens - ceiling)
-  const free = Math.max(0, ceiling - used)
+  const free = Math.max(0, ceiling - Math.max(used, breakdownTotal(contextUsage)))
   const usedPercent =
     typeof contextUsage?.percent === 'number'
       ? Math.round(contextUsage.percent)
@@ -168,8 +221,44 @@ export function SessionPanel({
       0
     ) + (mcp?.desktopTools ?? []).filter((tool) => tool.enabled).length
 
+  const breakdown = contextUsage?.breakdown
+  // With a breakdown the bar is made of the request's real sections; without one (pi, Claude Code,
+  // Codex — engines that do not build the request themselves) it stays the aggregate it always was.
+  const segments: MeterSegment[] = breakdown
+    ? [
+        { key: 'messages', label: '消息', tokens: breakdown.messages, tone: 'messages', always: true },
+        {
+          key: 'systemTools',
+          label: '系统工具',
+          tokens: breakdown.systemTools.tokens,
+          tone: 'system-tools',
+          always: breakdown.systemTools.count > 0
+        },
+        {
+          key: 'mcpTools',
+          label: 'MCP 工具',
+          tokens: breakdown.mcpTools.tokens,
+          tone: 'mcp-tools',
+          always: breakdown.mcpTools.count > 0
+        },
+        { key: 'systemPrompt', label: '系统提示词', tokens: breakdown.systemPrompt, tone: 'system-prompt', always: true },
+        { key: 'buffer', label: '自动压缩缓冲', tokens: buffer, tone: 'buffer' },
+        { key: 'free', label: '剩余空间', tokens: free, tone: 'free', always: true }
+      ]
+    : [
+        { key: 'used', label: '会话与工具', tokens: used, tone: 'used', always: true },
+        { key: 'buffer', label: '自动压缩缓冲', tokens: buffer, tone: 'buffer' },
+        { key: 'free', label: '剩余空间', tokens: free, tone: 'free', always: true }
+      ]
+  const legend = segments.filter((segment) => segment.tokens > 0 || segment.always)
+
   const engines = mcp?.engines ?? []
   const servers = (mcp?.servers ?? []).filter((server) => !server.builtin)
+  const attention = engines.filter((engine) => engine.enabled && !engine.available).length
+  const connected = engines.filter((engine) => engine.enabled && engine.available).length
+  const runningSubagents = subagents.filter(isSubagentRunning).length
+  const finishedSubagents = subagents.filter((record) => !isSubagentRunning(record)).length
+  const finishedTasks = (status.backgroundFinished ?? 0) + finishedSubagents
 
   const reconnect = async (): Promise<void> => {
     setBusy('engines')
@@ -228,6 +317,8 @@ export function SessionPanel({
     return '已连接'
   }
 
+  const workspaceName = status.repo?.name ?? status.cwd.split(/[\\/]/).filter(Boolean).pop()
+
   return (
     <aside className="session-panel" aria-label="会话概览">
       <header className="session-panel-head">
@@ -238,16 +329,24 @@ export function SessionPanel({
       </header>
 
       <div className="session-panel-scroll">
-        <PanelCard title="环境" collapsed={collapsed.env === true} onToggle={() => toggle('env')}>
+        <PanelCard
+          title="环境"
+          expanded={isOpen('env')}
+          onToggle={() => toggle('env')}
+          summary={<span className="panel-card-value">{workspaceName}</span>}
+        >
           <div className="panel-row" title={status.cwd}>
             <FolderIcon size={12} />
-            <span className="panel-row-main">{status.repo?.name ?? status.cwd}</span>
+            <span className="panel-row-main">{workspaceName}</span>
             {status.repo?.branch && (
               <span className="panel-badge" title={`${status.repo.branch}${status.repo.dirty ? ` · ${status.repo.dirty} 个未提交` : ''}`}>
                 <BranchIcon size={10} />
                 {status.repo.branch}
               </span>
             )}
+          </div>
+          <div className="panel-row muted" title={status.cwd}>
+            <span className="panel-row-main panel-row-path">{status.cwd}</span>
           </div>
           {additional.map((dir) => (
             <div className="panel-row" key={dir} title={dir}>
@@ -266,8 +365,16 @@ export function SessionPanel({
 
         <PanelCard
           title="上下文"
-          collapsed={collapsed.context === true}
+          expanded={isOpen('context')}
           onToggle={() => toggle('context')}
+          summary={
+            <>
+              <span className="panel-card-value">{windowTokens > 0 ? `${usedPercent}%` : '—'}</span>
+              <span className="panel-mini-meter" aria-hidden="true">
+                <span style={{ width: `${Math.min(100, usedPercent)}%` }} />
+              </span>
+            </>
+          }
         >
           <div className="panel-context-head">
             <strong>{usedPercent}% 已用</strong>
@@ -275,33 +382,33 @@ export function SessionPanel({
               {formatTokens(used)} / {windowTokens > 0 ? formatTokens(windowTokens) : '—'}
             </span>
           </div>
-          <ContextMeter used={used} buffer={buffer} window={windowTokens} />
+          <ContextMeter segments={segments} total={windowTokens} />
           <div className="panel-legend">
-            <div className="panel-legend-row">
-              <span className="panel-swatch used" />
-              <span className="panel-legend-label">会话与工具</span>
-              <span className="panel-legend-value">{formatTokens(used)}</span>
-              <span className="panel-legend-percent">{usedPercent}%</span>
-            </div>
-            {buffer > 0 && (
-              <div className="panel-legend-row">
-                <span className="panel-swatch buffer" />
-                <span className="panel-legend-label">自动压缩缓冲</span>
-                <span className="panel-legend-value">{formatTokens(buffer)}</span>
-                <span className="panel-legend-percent">
-                  {windowTokens > 0 ? Math.round((buffer / windowTokens) * 100) : 0}%
-                </span>
+            {legend.map((segment) => (
+              <div className="panel-legend-row" key={segment.key}>
+                <span className={`panel-swatch ${segment.tone}`} />
+                <span className="panel-legend-label">{segment.label}</span>
+                <span className="panel-legend-value">{formatTokens(segment.tokens)}</span>
+                <span className="panel-legend-percent">{percentOf(segment.tokens, windowTokens)}</span>
               </div>
-            )}
-            <div className="panel-legend-row">
-              <span className="panel-swatch free" />
-              <span className="panel-legend-label">剩余空间</span>
-              <span className="panel-legend-value">{formatTokens(free)}</span>
-              <span className="panel-legend-percent">
-                {windowTokens > 0 ? Math.round((free / windowTokens) * 100) : 0}%
-              </span>
-            </div>
+            ))}
           </div>
+          {breakdown && breakdown.mcpTools.count > 0 && (
+            <>
+              <button className="panel-link" onClick={() => setShowMcpTools((value) => !value)}>
+                <ChevronIcon size={10} /> MCP 工具 {breakdown.mcpTools.count} 个
+              </button>
+              {showMcpTools &&
+                breakdown.mcpTools.servers.map((server) => (
+                  <div className="panel-row panel-row-sub" key={server.name} title={`${server.name} · ${server.count} 个工具`}>
+                    <span className="panel-row-main">{server.name}</span>
+                    <span className="panel-row-state">
+                      {server.count} 个 · {formatTokens(server.tokens)}
+                    </span>
+                  </div>
+                ))}
+            </>
+          )}
           <div className="panel-context-foot">
             消息 {messageCount} · MCP 工具 {mcpToolCount}
             {status.autoCompactPercent !== undefined
@@ -312,8 +419,13 @@ export function SessionPanel({
 
         <PanelCard
           title="连接器"
-          collapsed={collapsed.connectors === true}
+          expanded={isOpen('connectors')}
           onToggle={() => toggle('connectors')}
+          summary={
+            <span className="panel-card-value">
+              {attention > 0 ? `${attention} 需重连` : connected > 0 ? `${connected} 已连接` : '无'}
+            </span>
+          }
         >
           {engines.map((engine) => (
             <div className="panel-row" key={engine.id} title={engine.error ?? engine.indexMessage}>
@@ -353,7 +465,12 @@ export function SessionPanel({
           </div>
         </PanelCard>
 
-        <PanelCard title="产出" collapsed={collapsed.outputs === true} onToggle={() => toggle('outputs')}>
+        <PanelCard
+          title="产出"
+          expanded={isOpen('outputs')}
+          onToggle={() => toggle('outputs')}
+          summary={<span className="panel-card-value">{outputs.length || '无'}</span>}
+        >
           {visibleOutputs.map((output) => (
             <button
               className="panel-row panel-row-button"
@@ -378,8 +495,17 @@ export function SessionPanel({
 
         <PanelCard
           title="后台任务"
-          collapsed={collapsed.tasks === true}
+          expanded={isOpen('tasks')}
           onToggle={() => toggle('tasks')}
+          summary={
+            <span className="panel-card-value">
+              {backgroundTasks.length + runningSubagents > 0
+                ? `${backgroundTasks.length + runningSubagents} 运行中`
+                : finishedTasks > 0
+                  ? `${finishedTasks} 已完成`
+                  : '空闲'}
+            </span>
+          }
         >
           {backgroundTasks.map((task) => (
             <div className="panel-row" key={task.id} title={task.command}>
@@ -404,9 +530,9 @@ export function SessionPanel({
             </button>
           ))}
           {backgroundTasks.length === 0 && !subagents.some(isSubagentRunning) && <div className="panel-empty">没有正在运行的后台任务</div>}
-          {((status.backgroundFinished ?? 0) + subagents.filter(record => !isSubagentRunning(record)).length) > 0 && (
+          {finishedTasks > 0 && (
             <button className="panel-link" onClick={() => setShowFinished(value => !value)}>
-              {(status.backgroundFinished ?? 0) + subagents.filter(record => !isSubagentRunning(record)).length} 个已完成
+              {finishedTasks} 个已完成
             </button>
           )}
           {showFinished && (status.backgroundHistory ?? []).map(task => (
@@ -426,5 +552,17 @@ export function SessionPanel({
         </PanelCard>
       </div>
     </aside>
+  )
+}
+
+/** What the breakdown already attributes; the rest of the window is still free. */
+function breakdownTotal(usage?: ContextUsage): number {
+  const breakdown = usage?.breakdown
+  if (!breakdown) return 0
+  return (
+    breakdown.messages +
+    breakdown.systemPrompt +
+    breakdown.systemTools.tokens +
+    breakdown.mcpTools.tokens
   )
 }

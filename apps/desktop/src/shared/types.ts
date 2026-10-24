@@ -151,6 +151,30 @@ export interface ContextUsage {
   tokens?: number | null;
   contextWindow?: number;
   percent?: number | null;
+  /** Where those tokens go; only engines that build the request themselves can tell. */
+  breakdown?: ContextBreakdown;
+}
+
+/**
+ * The request's tokens by origin, so the panel can show Claude-style sections instead of one bar.
+ *
+ * Only the Prophey engine fills this: it writes the request, so it knows how much of it is the
+ * system prompt, its own tool declarations, each MCP server's tools, and the transcript. A CLI
+ * engine cannot see those parts and leaves `breakdown` unset.
+ */
+export interface ContextBreakdown {
+  /** Everything in the transcript: user, assistant and tool messages. */
+  messages: number;
+  /** The system prompt the engine composes (role, workspace list, rules, appended app prompt). */
+  systemPrompt: number;
+  /** Declarations of the app's own tools: files, shell, subagents, questions. */
+  systemTools: { tokens: number; count: number };
+  /** Declarations of MCP servers' tools, grouped by the server the model names them after. */
+  mcpTools: {
+    tokens: number;
+    count: number;
+    servers: Array<{ name: string; tokens: number; count: number }>;
+  };
 }
 
 export interface SessionMessages {

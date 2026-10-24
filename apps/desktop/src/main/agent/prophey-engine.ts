@@ -6,7 +6,7 @@ import { guardedStream } from './stream-guard'
 import type { EngineStartOptions } from './engine'
 import { engineCapabilities } from '../../shared/engine'
 import type { Model, ThinkingLevel } from '@earendil-works/pi-ai'
-import type { PiModel, PiStatus, PromptImage, PromptResult, SessionStats } from '@shared/types'
+import type { ContextBreakdown, PiModel, PiStatus, PromptImage, PromptResult, SessionStats } from '@shared/types'
 import * as providers from '../providers'
 import * as speed from '../speed'
 import type { TranscriptStore, StoredTranscript } from '../transcript-store'
@@ -55,6 +55,8 @@ export class PropheyEngine implements AgentEngine {
   private live?: { prompt: number; output: number; message?: Record<string, unknown> }
   /** System prompt + tool declarations: sent with every request, invisible in the transcript. */
   private promptTokens = 0
+  /** The same split by origin (app tools vs each MCP server), for the panel's context card. */
+  private promptParts?: Omit<ContextBreakdown, 'messages'>
   /** Last push of the meter to the window; streaming would otherwise broadcast per token. */
   private publishedAt = 0
 
@@ -312,11 +314,74 @@ export class PropheyEngine implements AgentEngine {
   private usageSnapshot(): NonNullable<SessionStats['contextUsage']> {
     const tokens = Math.max(0, Math.round(this.contextTokens()))
     const contextWindow = this.model?.contextWindow
+    const breakdown = this.contextBreakdown()
     return {
       tokens,
       contextWindow,
-      percent: contextWindow ? Math.min(100, (tokens / contextWindow) * 100) : null
+      percent: contextWindow ? Math.min(100, (tokens / contextWindow) * 100) : null,
+      ...(breakdown ? { breakdown } : {})
     }
+  }
+
+  /**
+   * The request's tokens by origin.
+   *
+   * The fixed parts are character estimates, so they are scaled down when the provider measured
+   * less than they claim — then the transcript takes the remainder. That way the sections always
+   * add up to the number the meter shows instead of silently exceeding it.
+   */
+  private contextBreakdown(): ContextBreakdown | undefined {
+    const parts = this.promptParts
+    if (!parts) return undefined
+    const total = Math.max(0, Math.round(this.contextTokens()))
+    const estimated = parts.systemPrompt + parts.systemTools.tokens + parts.mcpTools.tokens
+    const ratio = estimated > total && estimated > 0 ? total / estimated : 1
+    const scale = (value: number): number => Math.floor(value * ratio)
+    const systemPrompt = scale(parts.systemPrompt)
+    const systemTools = { tokens: scale(parts.systemTools.tokens), count: parts.systemTools.count }
+    const servers = parts.mcpTools.servers.map((server) => ({ ...server, tokens: scale(server.tokens) }))
+    const mcpTools = {
+      tokens: servers.reduce((sum, server) => sum + server.tokens, 0),
+      count: parts.mcpTools.count,
+      servers
+    }
+    const messages = Math.max(0, total - systemPrompt - systemTools.tokens - mcpTools.tokens)
+    return { messages, systemPrompt, systemTools, mcpTools }
+  }
+
+  /**
+   * Count what the request carries besides the transcript.
+   *
+   * Tools are charged the declaration the model actually receives; MCP servers are grouped by the
+   * name they are announced under, so the panel can say `codegraph 12.4K` instead of `MCP tools`.
+   */
+  private measurePrompt(systemPrompt: string, tools: CoreTool[]): void {
+    const count = (value: unknown): number => Math.ceil(JSON.stringify(value).length / 4)
+    const servers = new Map<string, { tokens: number; count: number }>()
+    let declared = { tokens: 0, count: 0 }
+    for (const tool of tools) {
+      const tokens = count({ name: tool.name, description: tool.description, parameters: tool.parameters })
+      if (tool.source) {
+        const server = servers.get(tool.source) ?? { tokens: 0, count: 0 }
+        servers.set(tool.source, { tokens: server.tokens + tokens, count: server.count + 1 })
+      } else {
+        declared = { tokens: declared.tokens + tokens, count: declared.count + 1 }
+      }
+    }
+    const grouped = [...servers.entries()]
+      .map(([name, value]) => ({ name, ...value }))
+      .sort((a, b) => b.tokens - a.tokens)
+    const mcpTools = {
+      tokens: grouped.reduce((total, server) => total + server.tokens, 0),
+      count: grouped.reduce((total, server) => total + server.count, 0),
+      servers: grouped
+    }
+    this.promptParts = {
+      systemPrompt: Math.ceil(systemPrompt.length / 4),
+      systemTools: declared,
+      mcpTools
+    }
+    this.promptTokens = this.promptParts.systemPrompt + declared.tokens + mcpTools.tokens
   }
 
   /**
@@ -342,6 +407,7 @@ export class PropheyEngine implements AgentEngine {
     this.usage = undefined
     this.live = undefined
     this.promptTokens = 0
+    this.promptParts = undefined
     if (this.snapshot.contextUsage) this.setStatus({ contextUsage: undefined })
   }
 
@@ -900,7 +966,7 @@ ${text.trim()}`,
     // model is thinking instead of showing the pre-round number for the whole wait.
     const systemPrompt = this.systemPrompt()
     const declarations = toolDeclarations(tools)
-    this.promptTokens = Math.ceil(systemPrompt.length / 4) + Math.ceil(JSON.stringify(declarations).length / 4)
+    this.measurePrompt(systemPrompt, tools)
     this.live = undefined
     this.publishUsage(true)
     const stream = guardedStream<Record<string, unknown>>(signal => runtime.streamSimple(

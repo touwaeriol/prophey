@@ -32,6 +32,11 @@
   --bg-side: var(--bg-sidebar);
   --dim: var(--text-dim);
   --faint: var(--text-faint);
+  /* Context meter sections; the same four hues in both themes, tuned per theme below. */
+  --chart-messages: #5b8cd6;
+  --chart-system-tools: #58a86f;
+  --chart-mcp-tools: #4aa6a6;
+  --chart-system-prompt: #c9a227;
 }
 
 [data-theme='light'] {
@@ -65,6 +70,10 @@
   --shadow-md: 0 8px 24px rgba(20, 20, 30, 0.12);
   --shadow-lg: 0 16px 40px rgba(20, 20, 30, 0.16);
   --shadow-xl: 0 24px 70px rgba(20, 20, 30, 0.2);
+  --chart-messages: #3f6fb0;
+  --chart-system-tools: #3d8f5c;
+  --chart-mcp-tools: #2f8a8a;
+  --chart-system-prompt: #a6821a;
 }
 
 [data-theme='light'] .modal-backdrop,
@@ -7051,12 +7060,55 @@ button:disabled {
   flex: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 4px 0;
   color: var(--text-dim);
   font-size: 11.5px;
   font-weight: 600;
+}
+
+/* The folded card is one row: title on the left, the number that matters on the right. */
+.panel-card-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-card-summary {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 62%;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.panel-card-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel-mini-meter {
+  flex: none;
+  display: inline-block;
+  width: 34px;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--bg-hover);
+}
+
+.panel-mini-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
 }
 
 .panel-card-toggle:hover {
@@ -7113,6 +7165,16 @@ button:disabled {
 .panel-row-ellipsis {
   font-family: 'Cascadia Code', 'Consolas', monospace;
   font-size: 10.8px;
+}
+
+.panel-row-path {
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+
+.panel-row-sub {
+  padding-left: 12px;
+  color: var(--text-dim);
 }
 
 .panel-row-state {
@@ -7201,6 +7263,7 @@ button:disabled {
 
 .panel-meter {
   display: flex;
+  gap: 1px;
   height: 6px;
   margin: 6px 0 8px;
   border-radius: 3px;
@@ -7214,6 +7277,40 @@ button:disabled {
 
 .panel-meter-buffer {
   background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.panel-meter-seg {
+  height: 100%;
+  min-width: 1px;
+  transition: width 0.25s ease;
+}
+
+.panel-meter-seg.messages {
+  background: var(--chart-messages);
+}
+
+.panel-meter-seg.system-tools {
+  background: var(--chart-system-tools);
+}
+
+.panel-meter-seg.mcp-tools {
+  background: var(--chart-mcp-tools);
+}
+
+.panel-meter-seg.system-prompt {
+  background: var(--chart-system-prompt);
+}
+
+.panel-meter-seg.used {
+  background: var(--accent);
+}
+
+.panel-meter-seg.buffer {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.panel-meter-seg.free {
+  background: var(--bg-hover);
 }
 
 .panel-legend {
@@ -7239,6 +7336,22 @@ button:disabled {
 
 .panel-swatch.used {
   background: var(--accent);
+}
+
+.panel-swatch.messages {
+  background: var(--chart-messages);
+}
+
+.panel-swatch.system-tools {
+  background: var(--chart-system-tools);
+}
+
+.panel-swatch.mcp-tools {
+  background: var(--chart-mcp-tools);
+}
+
+.panel-swatch.system-prompt {
+  background: var(--chart-system-prompt);
 }
 
 .panel-swatch.buffer {
@@ -7349,7 +7462,8 @@ button:disabled {
   }
 
   .panel-row-state,
-  .panel-legend-percent {
+  .panel-legend-percent,
+  .panel-mini-meter {
     display: none;
   }
 }

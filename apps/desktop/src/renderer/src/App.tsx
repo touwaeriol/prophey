@@ -4,6 +4,7 @@ import type {
   AppUpdateSnapshot,
   AskAnswer,
   AskRequest,
+  ContextUsage,
   McpState,
   PiStatus,
   Project,
@@ -129,9 +130,7 @@ export default function App(): React.JSX.Element {
   const subagents = allSubagents.filter(record => record.parentSession && messagesBelong(record.parentSession, status))
   const [mcpState, setMcpState] = useState<McpState | undefined>(undefined)
   /** Context-window usage of the current session, shown next to the composer. */
-  const [contextUsage, setContextUsage] = useState<
-    { tokens?: number | null; contextWindow?: number; percent?: number | null } | undefined
-  >(undefined)
+  const [contextUsage, setContextUsage] = useState<ContextUsage | undefined>(undefined)
   /** Bumped after a queued command runs, so the queue keeps draining without a run to end. */
   const [queueTick, setQueueTick] = useState(0)
   const queueSending = useRef(new Set<string>())

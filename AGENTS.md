@@ -71,12 +71,14 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 ## 会话概览面板（仿 Claude Desktop 右侧栏）
 
 - 入口：标题栏右侧的面板按钮（`TabBar`，`ListIcon`），开关状态存 localStorage `pi-session-panel`。面板是 `.main-body` 里的 flex 兄弟节点（`.session-panel`，306px，窄窗口 264px），不覆盖聊天区，也不影响右侧会话大纲（大纲在 `.chat-area` 内绝对定位）。
-- 五张卡片（`components/SessionPanel.tsx`）：**环境**（`status.cwd` / `status.repo` 分支与未提交数 / 会话 additional 根 / 引擎 · 模型）、**上下文**、**连接器**、**产出**、**后台任务**。卡片可各自折叠；`PanelCard` 是唯一容器，不要为单张卡片另写折叠逻辑。
-- **上下文只用真实值**：pi 的 `getContextUsage()` 只有 `tokens / contextWindow / percent`，没有 Claude 的 Messages / System prompt / Memory files 分类。卡片因此只画三块——已用（会话与工具，聚合值）、自动压缩缓冲（`window × (1 - autoCompactPercent/100)`，压缩关闭时为 0）、剩余空间（`ceiling - used`），另附消息数与 MCP 工具数（都是计数，不是 token）。**不要编造分类 token 数字**，也不要显示「系统提示词 4.9K」这类无来源数据。
+- 五张卡片（`components/SessionPanel.tsx`）：**环境**（`status.cwd` / `status.repo` 分支与未提交数 / 会话 additional 根 / 引擎 · 模型）、**上下文**、**连接器**、**产出**、**后台任务**。`PanelCard` 是唯一容器，不要为单张卡片另写折叠逻辑。
+- **折叠态是默认视图，也是信息本身**（仿 Claude Code）：每张卡片折起来只剩一行「标题 + 该卡片最该看的数字」，环境给目录名、上下文给百分比 + 迷你条、连接器给 `N 已连接` / `N 需重连`、产出给文件数、后台任务给 `N 运行中` / `N 已完成`。展开状态存 localStorage `pi-session-panel-cards`（`{context:true}` 这种形状，只在点击时写），所以“我习惯看上下文”这种偏好不会每次丢。新增卡片时必须同时给它写 `summary`，否则折起来就是空行。
+- **上下文分类只在 Prophey 引擎下存在**：引擎自己拼请求，所以它知道每部分多大（`ContextUsage.breakdown`）。`measurePrompt()` 用“发给模型的声明”估算系统提示词、自建工具（文件/命令/子代理/提问，`CoreTool.source` 为空）、每个 MCP 服务（`source` = 端点名，`mcp-client` 填的）各占多少；消息部分取“总量 − 其余部分”的余额，所以各段加起来永远等于环上的数字；估算比实测还大时（字符/4 对 JSON 声明偏高）按比例压到实测总量，不会出现“各段之和 > 已用”。pi / Claude Code / Codex 拿不到分类，`breakdown` 留空，卡片自动退回原来那三块（会话与工具 / 自动压缩缓冲 / 剩余空间）——**不要为它们编造分类**。
+- 分类条是 `.panel-meter` 里的 `.panel-meter-seg`，颜色来自 `--chart-messages` / `--chart-system-tools` / `--chart-mcp-tools` / `--chart-system-prompt`（深浅色各一套）；图例行即使为 0 也保留（`always`），只看不留空白。MCP 工具那行可展开，列出每个服务端占的 token 与工具数。
 - **产出**来自 transcript 的写文件工具调用（`lib/session-outputs.ts`，纯函数、有单测）：`write_file`/`write`/`Write`/`edit_file`/`Edit`/`multiedit` 等取 `path`/`file_path` 参数，Codex 的 `apply_patch` 解析 `*** Update|Add|Delete File:` 行；相对路径按 `status.cwd` 解析，失败的调用丢弃，同一文件只留一条（最新在前，保留首次的写/改类型）。点条目走 `workspace:reveal`，主进程只允许会话工作区（含 additional）内的路径，越界或文件不存在返回错误，不在渲染层拼路径直接开。
 - **后台任务**读 `status.backgroundTasks`（运行中）和 `status.backgroundFinished`（本会话已结束数量，`BashTasks.finishedCount()`，受 128 条保留上限约束，是「最近」不是生命周期总数）。停止按钮走 `engine:stop-background-task` → `AgentEngine.stopBackgroundTask?`；只有 Prophey 引擎实现，其他引擎回错误并提示用 `stop_bash_task`，**不要给所有引擎假装支持**。
 - **连接器**读 `get_mcp_state`（App 已订阅 `mcp:state`，面板和设置页共享同一份状态）：内建引擎 codegraph/warpgrep/web 显示连接/索引状态，「重新检测」调 `refreshMcpEngines`；外部 MCP 服务显示启用状态并提供停用/启用（写 `mcp.json` 后 `reloadPiConfig`）。「管理」直接打开设置 → MCP 标签。
-- 验证：`node scripts/test-session-panel.cjs`（真实 Electron、隔离 profile、种子事件，断言五张卡片不横向溢出、聊天区保留宽度，截图写 `artifacts/session-panel/`）；行为回归在 `npm run test:smoke` 的 `tests/session-panel-smoke.cjs`（卡片标题、上下文计量、连接器「管理」跳 MCP 标签、产出与后台任务行、折叠与持久化）。
+- 验证：`node scripts/test-session-panel.cjs`（真实 Electron、隔离 profile、种子事件，断言五张卡片不横向溢出、聊天区保留宽度，截图写 `artifacts/session-panel/`，含折叠态 `folded.png`）；行为回归在 `npm run test:smoke` 的 `tests/session-panel-smoke.cjs`（折叠摘要、展开后的卡片内容、注入 `contextUsage.breakdown` 后的分段条与 MCP 服务端占比、连接器「管理」跳 MCP 标签、产出与后台任务行、折叠持久化）。
 
 ## Session view, thinking, model allowlist
 

@@ -11,6 +11,13 @@ import type { Tool } from '@earendil-works/pi-ai'
  */
 export interface CoreTool {
   name: string
+  /**
+   * Where the tool comes from when it is not ours (`codegraph`, `warpgrep`, …).
+   *
+   * Only the context meter uses it: a request's token cost is split between the app's own tools and
+   * each MCP server, and the model must not see the field in the declaration.
+   */
+  source?: string
   description: string
   /** JSON schema for the arguments; providers pass it through as-is. */
   parameters: Record<string, unknown>

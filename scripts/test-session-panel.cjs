@@ -72,6 +72,14 @@ if (!process.versions.electron) {
         await pause(300)
         await evaluate('document.querySelector(".tabbar .icon-btn[title^=\\"显示/隐藏会话概览\\"]").click()')
         await until('!!document.querySelector(".session-panel")', 'panel')
+        // Folded is the default view (each row carries its own summary); capture it before expanding.
+        fs.mkdirSync(output, { recursive: true })
+        const foldedBox = await evaluate('(() => { const r = document.querySelector(".session-panel").getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }; })()')
+        await pause(250)
+        fs.writeFileSync(path.join(output, 'folded.png'), (await win.webContents.capturePage(foldedBox)).toPNG())
+        // The rest of this proof needs the full bodies.
+        await evaluate('Array.from(document.querySelectorAll(".panel-card")).forEach(card => { if (!card.querySelector(".panel-card-body")) card.querySelector(".panel-card-toggle").click() })')
+        await until('document.querySelectorAll(".panel-card .panel-card-body").length === 5', 'cards expanded')
 
         const owner = await evaluate('window.pi.getStatus().then(s => s.sessionKey ?? s.sessionFile)')
         const emit = record => win.webContents.send('pi:event', { ...record, sessionKey: owner })

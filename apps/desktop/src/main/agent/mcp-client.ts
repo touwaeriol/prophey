@@ -105,6 +105,8 @@ export async function loadMcpTools(endpoints: McpEndpoint[], signal?: AbortSigna
       const name = `${endpoint.name}__${tool.name}`
       tools.push({
         name,
+        // Kept out of the declaration sent to the model: it only groups tools in the context meter.
+        source: endpoint.name,
         description: tool.description ?? `${endpoint.name} 的 ${tool.name}`,
         parameters: tool.inputSchema ?? { type: 'object', properties: {} },
         call: async (args, signal) => {
