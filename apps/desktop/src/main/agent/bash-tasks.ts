@@ -36,6 +36,15 @@ export class BashTasks {
       .map(task => ({ id: task.id, command: task.command, startedAt: task.startedAt }))
   }
 
+  /**
+   * Background commands that already ended, for the session panel's "N finished" line.
+   *
+   * Retained tasks are bounded (see `run`), so this is a recent count, not a lifetime total.
+   */
+  finishedCount(): number {
+    return [...this.tasks.values()].filter(task => task.background && task.state !== 'running').length
+  }
+
   private changed(): void { this.options.onChange?.(this.active()) }
 
   async stopAll(): Promise<void> {

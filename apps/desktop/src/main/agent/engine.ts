@@ -98,6 +98,14 @@ export interface AgentEngine {
   abort(): Promise<void>
 
   /**
+   * Stop one background command listed in `PiStatus.backgroundTasks`.
+   *
+   * Optional on purpose: only the Prophey engine owns a task list, so the session panel shows the
+   * stop button when this exists and a plain list otherwise.
+   */
+  stopBackgroundTask?(id: string): Promise<{ ok: boolean; error?: string }>
+
+  /**
    * Start whatever background polling the engine needs.
    *
    * pi has to poll `get_state` because its event stream is not authoritative about `busy`; an

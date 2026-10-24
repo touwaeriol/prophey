@@ -26,6 +26,7 @@ import { AskQuestionPanel } from './components/AskQuestionPanel'
 import { ConfirmDialog, type ConfirmRequest } from './components/ConfirmDialog'
 import { SubagentsDrawer } from './components/SubagentsDrawer'
 import { RunStatusBar } from './components/RunStatusBar'
+import { SessionPanel } from './components/SessionPanel'
 import { Markdown } from './components/Markdown'
 import type { DraftImage } from './lib/images'
 import { isSubagentRunning } from './lib/subagents'
@@ -69,6 +70,21 @@ export default function App(): React.JSX.Element {
   }>({ runningTools: 0 })
   const [, setTick] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  /** Right-hand inspector; persisted so the layout survives a restart like the sidebar does. */
+  const [panelOpen, setPanelOpen] = useState(() => {
+    try {
+      return localStorage.getItem('pi-session-panel') === '1'
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('pi-session-panel', panelOpen ? '1' : '0')
+    } catch {
+      // private mode / storage disabled: the panel just starts closed next time
+    }
+  }, [panelOpen])
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   /** Pending window-level question (e.g. “delete this project?”). */
@@ -497,6 +513,12 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (status.phase !== 'ready') setAskQueue([])
   }, [status.phase])
+
+  // Connectors in the session panel follow the main process instead of asking once on open.
+  useEffect(() => {
+    void window.pi.getMcpState().then(setMcpState).catch(() => undefined)
+    return window.pi.onMcpState((state) => setMcpState(state))
+  }, [])
 
   const answerAsk = useCallback((answers: AskAnswer[]) => {
     const current = askQueueRef.current[0]
@@ -1024,6 +1046,9 @@ export default function App(): React.JSX.Element {
 
   const title =
     status.sessionName || sessions.find((session) => session.path === activePath)?.title || '新会话'
+  /** Extra roots of the active session, for the session panel's environment card. */
+  const activeAdditional =
+    sessions.find((session) => session.path === activePath)?.additional ?? []
 
   return (
     <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
@@ -1083,12 +1108,14 @@ export default function App(): React.JSX.Element {
           status={status}
           streaming={Boolean(status.isStreaming || status.compacting)}
           sidebarOpen={sidebarOpen}
+          panelOpen={panelOpen}
           subagentsRunning={subagents.filter(isSubagentRunning).length}
           subagentsFinished={
             subagents.filter((record) => !record.restored && record.status === 'idle').length
           }
           onNew={() => void chooseWorkspace()}
           onToggleSidebar={() => setSidebarOpen((value) => !value)}
+          onTogglePanel={() => setPanelOpen((value) => !value)}
           onOpenSubagents={() => setSubagentsOpen(true)}
         />
 
@@ -1257,6 +1284,22 @@ export default function App(): React.JSX.Element {
               }
             />
           </div>
+
+          {panelOpen && (
+            <SessionPanel
+              status={status}
+              contextUsage={contextUsage}
+              additional={activeAdditional}
+              mcp={mcpState}
+              items={items}
+              onClose={() => setPanelOpen(false)}
+              onOpenSettings={(tab) => {
+                setSettingsTab(tab)
+                setSettingsOpen(true)
+              }}
+              onNotice={setToast}
+            />
+          )}
 
           {subagentsOpen && (
             <SubagentsDrawer

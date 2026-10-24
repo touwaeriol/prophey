@@ -161,9 +161,33 @@ export class PropheyEngine implements AgentEngine {
   }
 
   setStatus(patch: Partial<PiStatus>): void {
-    if ('sessionFile' in patch) patch = { ...patch, backgroundTasks: this.bashTasks.get(this.sessionId)?.active() ?? [] }
+    if ('sessionFile' in patch) {
+      const commands = this.bashTasks.get(this.sessionId)
+      patch = {
+        ...patch,
+        backgroundTasks: commands?.active() ?? [],
+        backgroundFinished: commands?.finishedCount() ?? 0
+      }
+    }
     this.snapshot = { ...this.snapshot, ...patch }
     this.options.onStatus(this.snapshot)
+  }
+
+  /**
+   * Stop one background command from the session panel.
+   *
+   * Only this engine owns a task list; pi/Claude/Codex report "unsupported" so the panel can say so
+   * instead of showing a button that does nothing.
+   */
+  async stopBackgroundTask(id: string): Promise<{ ok: boolean; error?: string }> {
+    const commands = this.bashTasks.get(this.sessionId)
+    if (!commands) return { ok: false, error: '当前会话没有后台命令' }
+    try {
+      await commands.stop(id)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   poll(): void {
@@ -514,7 +538,11 @@ ${text.trim()}`,
         directory: this.options.bashLogDirectory ?? path.join(os.tmpdir(), 'prophey-command-logs'),
         shell: this.options.shellPath ?? 'bash',
         notify: text => this.queueNotice(text, true, owner),
-        onChange: tasks => { if (owner === this.sessionId) this.setStatus({ backgroundTasks: tasks }) }
+        onChange: tasks => {
+          if (owner === this.sessionId) {
+            this.setStatus({ backgroundTasks: tasks, backgroundFinished: commands!.finishedCount() })
+          }
+        }
       })
       this.bashTasks.set(owner, commands)
     }

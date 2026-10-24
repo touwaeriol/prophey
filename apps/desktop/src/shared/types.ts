@@ -33,6 +33,8 @@ export interface PiStatus {
   sessionLocked?: boolean;
   activity?: { label: string; since: number };
   backgroundTasks?: Array<{ id: string; command: string; startedAt: number }>;
+  /** Background commands of this session that already finished; the session panel counts them. */
+  backgroundFinished?: number;
   /** A context transfer owns the engine; queued prompts and mutations must wait. */
   switchingEngine?: EngineId;
   engine?: EngineId;
@@ -604,6 +606,10 @@ export interface PiBridge {
   switchSession(sessionPath: string): Promise<SwitchResult>;
   getMessages(): Promise<AgentMessage[]>;
   getSessionStats(): Promise<SessionStats>;
+  /** Stop one background command (Prophey only; other engines report it as unsupported). */
+  stopBackgroundTask(id: string): Promise<{ ok: boolean; error?: string }>;
+  /** Reveal a file the session produced in the OS file manager; must live in the session workspace. */
+  revealPath(path: string): Promise<{ ok: boolean; error?: string }>;
   listSessions(): Promise<SessionSummary[]>;
   openAgentDir(): Promise<void>;
   openExternal(url: string): Promise<void>;

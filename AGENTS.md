@@ -68,6 +68,16 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - 量间距不要靠肉眼拍脑袋：写一个一次性脚本（种一份带工具调用的 transcript → 用真实构建打开 → 打印 `itemGaps` / `contentHeight` / `toolHeadHeight` 并截图到 `artifacts/`），对比改前改后的数字，量完删掉、不要提交。
 - 每轮结束的统计行（`.run-status`）来自 `App.tsx` 的 `run` 状态：`agent_start` 记开始时间、`tool_execution_start/end` 加减运行中数量、`agent_settled` 记结束时间并通过 `pi:session-stats`（RPC `get_session_stats`）取 `tokens.total`。1 秒定时器只为刷新计时，不要用它做别的。
 
+## 会话概览面板（仿 Claude Desktop 右侧栏）
+
+- 入口：标题栏右侧的面板按钮（`TabBar`，`ListIcon`），开关状态存 localStorage `pi-session-panel`。面板是 `.main-body` 里的 flex 兄弟节点（`.session-panel`，306px，窄窗口 264px），不覆盖聊天区，也不影响右侧会话大纲（大纲在 `.chat-area` 内绝对定位）。
+- 五张卡片（`components/SessionPanel.tsx`）：**环境**（`status.cwd` / `status.repo` 分支与未提交数 / 会话 additional 根 / 引擎 · 模型）、**上下文**、**连接器**、**产出**、**后台任务**。卡片可各自折叠；`PanelCard` 是唯一容器，不要为单张卡片另写折叠逻辑。
+- **上下文只用真实值**：pi 的 `getContextUsage()` 只有 `tokens / contextWindow / percent`，没有 Claude 的 Messages / System prompt / Memory files 分类。卡片因此只画三块——已用（会话与工具，聚合值）、自动压缩缓冲（`window × (1 - autoCompactPercent/100)`，压缩关闭时为 0）、剩余空间（`ceiling - used`），另附消息数与 MCP 工具数（都是计数，不是 token）。**不要编造分类 token 数字**，也不要显示「系统提示词 4.9K」这类无来源数据。
+- **产出**来自 transcript 的写文件工具调用（`lib/session-outputs.ts`，纯函数、有单测）：`write_file`/`write`/`Write`/`edit_file`/`Edit`/`multiedit` 等取 `path`/`file_path` 参数，Codex 的 `apply_patch` 解析 `*** Update|Add|Delete File:` 行；相对路径按 `status.cwd` 解析，失败的调用丢弃，同一文件只留一条（最新在前，保留首次的写/改类型）。点条目走 `workspace:reveal`，主进程只允许会话工作区（含 additional）内的路径，越界或文件不存在返回错误，不在渲染层拼路径直接开。
+- **后台任务**读 `status.backgroundTasks`（运行中）和 `status.backgroundFinished`（本会话已结束数量，`BashTasks.finishedCount()`，受 128 条保留上限约束，是「最近」不是生命周期总数）。停止按钮走 `engine:stop-background-task` → `AgentEngine.stopBackgroundTask?`；只有 Prophey 引擎实现，其他引擎回错误并提示用 `stop_bash_task`，**不要给所有引擎假装支持**。
+- **连接器**读 `get_mcp_state`（App 已订阅 `mcp:state`，面板和设置页共享同一份状态）：内建引擎 codegraph/warpgrep/web 显示连接/索引状态，「重新检测」调 `refreshMcpEngines`；外部 MCP 服务显示启用状态并提供停用/启用（写 `mcp.json` 后 `reloadPiConfig`）。「管理」直接打开设置 → MCP 标签。
+- 验证：`node scripts/test-session-panel.cjs`（真实 Electron、隔离 profile、种子事件，断言五张卡片不横向溢出、聊天区保留宽度，截图写 `artifacts/session-panel/`）；行为回归在 `npm run test:smoke` 的 `tests/session-panel-smoke.cjs`（卡片标题、上下文计量、连接器「管理」跳 MCP 标签、产出与后台任务行、折叠与持久化）。
+
 ## Session view, thinking, model allowlist
 
 - 会话导航：`SessionNavigator.tsx` 在聊天区右侧渲染标题大纲（`buildOutline` 提取 assistant Markdown 标题，无标题时用首行兜底）和用户提问时间线。消息元素带 `data-message-id`，App 用 `jumpToMessage` 滚动定位；滚动时按消息相对位置更新 `activeUserIndex`，到底部时强制标记最后一条提问。

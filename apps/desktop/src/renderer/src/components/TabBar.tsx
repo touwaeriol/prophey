@@ -1,26 +1,30 @@
 import { engineLabel } from '@shared/engine'
 import type { PiStatus } from '@shared/types'
-import { BranchIcon, CloseIcon, PanelIcon, PlusIcon, SparkIcon } from './Icons'
+import { BranchIcon, CloseIcon, ListIcon, PanelIcon, PlusIcon, SparkIcon } from './Icons'
 
 export function TabBar({
   title,
   status,
   streaming,
   sidebarOpen,
+  panelOpen,
   subagentsRunning,
   subagentsFinished,
   onNew,
   onToggleSidebar,
+  onTogglePanel,
   onOpenSubagents
 }: {
   title: string
   status: PiStatus
   streaming: boolean
   sidebarOpen: boolean
+  panelOpen: boolean
   subagentsRunning: number
   subagentsFinished: number
   onNew: () => void
   onToggleSidebar: () => void
+  onTogglePanel: () => void
   onOpenSubagents: () => void
 }) {
   return (
@@ -61,6 +65,13 @@ export function TabBar({
         >
           <SparkIcon size={13} />
           <span>{subagentsRunning > 0 ? subagentsRunning : subagentsFinished || ''}</span>
+        </button>
+        <button
+          className={`icon-btn ${panelOpen ? 'on' : ''}`}
+          title="显示/隐藏会话概览（环境、上下文、连接器、产出、后台任务）"
+          onClick={onTogglePanel}
+        >
+          <ListIcon size={15} />
         </button>
         <button
           className={`icon-btn ${sidebarOpen ? 'on' : ''}`}

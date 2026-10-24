@@ -2134,6 +2134,39 @@ function registerIpc(): void {
     }
   })
 
+  // Session panel: stop one background command. Only Prophey owns a task list (see engine.ts).
+  handle('engine:stop-background-task', async (_event, id: string) => {
+    if (!currentEngine?.stopBackgroundTask) {
+      return { ok: false, error: '当前引擎不提供后台任务列表，请在对话里用 stop_bash_task' }
+    }
+    return currentEngine.stopBackgroundTask(String(id))
+  })
+
+  // Session panel: show a produced file in Explorer/Finder. Only paths inside the session's
+  // workspace are accepted (symlinks are resolved first), so a model-provided path cannot open
+  // arbitrary files on the machine.
+  handle('workspace:reveal', async (_event, target: string) => {
+    const workspace = currentEngine?.workspace()
+    const roots = [workspace?.primary, ...(workspace?.additional ?? [])].filter(
+      (root): root is string => typeof root === 'string' && root !== ''
+    )
+    const real = async (value: string): Promise<string | undefined> => {
+      try {
+        return await fs.realpath(value)
+      } catch {
+        return undefined
+      }
+    }
+    const resolved = await real(path.resolve(String(target ?? '')))
+    if (!resolved) return { ok: false, error: '文件不存在或已被删除' }
+    const inside = (
+      await Promise.all(roots.map((root) => real(path.resolve(root))))
+    ).some((root) => root && (resolved === root || resolved.startsWith(root + path.sep)))
+    if (!inside) return { ok: false, error: '只能打开当前会话目录里的文件' }
+    shell.showItemInFolder(resolved)
+    return { ok: true }
+  })
+
   handle('pi:open-agent-dir', async () => {
     const dir = profile.agentDir()
     await fs.mkdir(dir, { recursive: true })
