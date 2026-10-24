@@ -103,10 +103,18 @@ app.on('browser-window-created', (_event, window) => {
       assert.equal((await evaluate('window.pi.setModel("proof", "plain")')).ok, true)
       assert.deepEqual(await evaluate('window.pi.listThinkingLevels()'), ['off'])
       // Verify authoritative background status is visible even without agent_start events.
+      // Re-send on every attempt: the engine broadcasts its own status after a model change, which
+      // can overwrite this injected one before the window renders it (that race made CI flaky).
       const state = await evaluate('window.pi.getStatus()')
-      window.webContents.send('pi:status', { ...state, isStreaming: false, backgroundTasks: [{ id: 'proof', command: 'test fixture', startedAt: Date.now() }] })
-      await until(() => evaluate('document.querySelector(".run-status")?.textContent.includes("后台命令运行中 1")'), 'background status without foreground turn')
+      let backgroundVisible = false
+      for (let attempt = 0; attempt < 30 && !backgroundVisible; attempt++) {
+        window.webContents.send('pi:status', { ...state, isStreaming: false, backgroundTasks: [{ id: 'proof', command: 'test fixture', startedAt: Date.now() }] })
+        await new Promise((resolve) => setTimeout(resolve, 150))
+        backgroundVisible = await evaluate('document.querySelector(".run-status")?.textContent.includes("后台命令运行中 1")')
+      }
+      assert.equal(backgroundVisible, true, 'background status without foreground turn')
       window.webContents.send('pi:status', state)
+      await until(() => evaluate('!document.querySelector(".run-status")?.textContent.includes("后台命令运行中 1")'), 'background status cleared')
       await require('./ask-panel-smoke.cjs')(evaluate, until)
       await require('./session-switch-smoke.cjs')(evaluate, until, window)
       await require('./image-copy-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
