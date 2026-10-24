@@ -39,6 +39,7 @@ import { realBashPath, withRealBash } from './shell'
 import * as speed from './speed'
 import type { AgentEngine, AgentWorkspace } from './agent/engine'
 import type {
+  AgentMessage,
   AppSettings,
   AskAnswer,
   LoginMessage,
@@ -2136,8 +2137,12 @@ function registerIpc(): void {
   })
 
   handle('pi:get-messages', async () => {
-    if (!currentEngine.running()) return []
-    return currentEngine.messages()
+    // The engine names the session it answered from: while a switch is in flight it can still hold
+    // the previous transcript, and the window must not paint that under the new session.
+    const engineState = currentEngine.state()
+    const sessionKey = engineState.sessionKey ?? engineState.sessionFile
+    if (!currentEngine.running()) return { sessionKey, messages: [] }
+    return { sessionKey, messages: (await currentEngine.messages()) as AgentMessage[] }
   })
 
   handle('pi:list-sessions', async () => {

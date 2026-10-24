@@ -131,10 +131,13 @@ module.exports = async function imageCopySmoke(evaluate, until, window, setSessi
 
     // The smoke entry supplies only session history, through the real preload.
     // Like queue-smoke, inject status to refresh the renderer without sending a prompt.
-    setSessionFixture([{ role: 'user', content: [
-      { type: 'text', text: 'image-copy-smoke session fixture' },
-      { type: 'image', mimeType: 'image/jpeg', data: fixture.toJPEG(90).toString('base64') }
-    ], timestamp: Date.now() }])
+    setSessionFixture({
+      sessionKey: 'image-copy-smoke-fixture',
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: 'image-copy-smoke session fixture' },
+        { type: 'image', mimeType: 'image/jpeg', data: fixture.toJPEG(90).toString('base64') }
+      ], timestamp: Date.now() }]
+    })
     sessionInjected = true
     contents.send('pi:status', { ...idle, sessionKey: 'image-copy-smoke-fixture' })
     await until(() => evaluate('!!document.querySelector(".message-image")'), 'session image')

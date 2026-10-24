@@ -5,7 +5,7 @@ const os = require('node:os')
 const path = require('node:path')
 const esbuild = require('esbuild')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'prophey-renderer-tests-'))
-for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'actions', 'subagents']) {
+for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'actions', 'subagents']) {
   esbuild.buildSync({ entryPoints: [path.resolve(__dirname, '../apps/desktop/src/renderer/src/lib', name + '.ts')], outfile: path.join(temp, name + '.cjs'), bundle: true, platform: 'node', format: 'cjs' })
 }
 after(() => fs.rmSync(temp, { recursive: true, force: true }))
@@ -64,6 +64,7 @@ test('renderer: file mentions replace paths containing s and preserve surroundin
 })
 
 const { buildSessionGroups } = require(path.join(temp, 'session-groups.cjs'))
+const { messagesBelong } = require(path.join(temp, 'session-messages.cjs'))
 const { runAction } = require(path.join(temp, 'actions.cjs'))
 const { isSubagentRunning } = require(path.join(temp, 'subagents.cjs'))
 const session = (id, cwd) => ({ id, path: id, title: id, cwd, createdAt: 1, updatedAt: Date.now() })
@@ -209,6 +210,26 @@ test('renderer: pinning or archiving the oldest session does not make its direct
 
   const archived = { ...plainOptions(sessions), archived: new Set(['a1']) }
   assert.deepEqual(buildSessionGroups(archived).map((group) => group.key), before)
+})
+
+test('renderer: a transcript that names another session is never accepted', () => {
+  const owner = {
+    sessionKey: 'C:\\Users\\me\\AppData\\Roaming\\app\\transcripts\\s_a.jsonl',
+    sessionFile: 'C:\\Users\\me\\AppData\\Roaming\\app\\transcripts\\s_a.jsonl'
+  }
+  assert.equal(messagesBelong(owner.sessionKey, owner), true)
+  // Windows path aliases (slashes, casing) still belong to the same session.
+  assert.equal(messagesBelong('c:/users/ME/appdata/roaming/app/transcripts/s_a.jsonl', owner), true)
+  // The engine still holding the previous transcript while a switch is in flight.
+  assert.equal(
+    messagesBelong('C:\\Users\\me\\AppData\\Roaming\\app\\transcripts\\s_b.jsonl', owner),
+    false
+  )
+  // A session id and a path of the same session are both accepted via sessionKey/sessionFile.
+  assert.equal(messagesBelong('s_a', { sessionKey: 's_a' }), true)
+  // Engines without a session identity keep the old behaviour.
+  assert.equal(messagesBelong(undefined, owner), true)
+  assert.equal(messagesBelong('anything', {}), true)
 })
 
 test('renderer: failed saves preserve draft, release busy and report result or transport error', async () => {

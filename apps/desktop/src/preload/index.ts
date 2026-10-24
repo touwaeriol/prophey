@@ -1,6 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  AgentMessage,
   AppUpdateSnapshot,
   AskAnswer,
   McpState,
@@ -10,6 +9,7 @@ import type {
   Project,
   ProviderAuthType,
   RepoInfo,
+  SessionMessages,
   SessionSummary,
   SpeedMode
 } from '../shared/types'
@@ -68,7 +68,7 @@ const bridge: PiBridge = {
   abort: () => ipcRenderer.invoke('pi:abort') as Promise<void>,
   newSession: (options) => ipcRenderer.invoke('pi:new-session', options),
   switchSession: (sessionPath: string) => ipcRenderer.invoke('pi:switch-session', sessionPath),
-  getMessages: () => ipcRenderer.invoke('pi:get-messages') as Promise<AgentMessage[]>,
+  getMessages: () => ipcRenderer.invoke('pi:get-messages') as Promise<SessionMessages>,
   getSessionStats: () => ipcRenderer.invoke('pi:session-stats'),
   stopBackgroundTask: (id: string) => ipcRenderer.invoke('engine:stop-background-task', id),
   revealPath: (path: string) => ipcRenderer.invoke('workspace:reveal', path),

@@ -140,6 +140,12 @@ export interface SessionStats {
   };
 }
 
+export interface SessionMessages {
+  /** Session the engine answered from; the window drops answers that belong to another session. */
+  sessionKey?: string;
+  messages: AgentMessage[];
+}
+
 export interface PromptImage {
   type: "image";
   data: string;
@@ -604,7 +610,7 @@ export interface PiBridge {
   abort(): Promise<void>;
   newSession(options?: SessionSwitchOptions): Promise<SwitchResult>;
   switchSession(sessionPath: string): Promise<SwitchResult>;
-  getMessages(): Promise<AgentMessage[]>;
+  getMessages(): Promise<SessionMessages>;
   getSessionStats(): Promise<SessionStats>;
   /** Stop one background command (Prophey only; other engines report it as unsupported). */
   stopBackgroundTask(id: string): Promise<{ ok: boolean; error?: string }>;

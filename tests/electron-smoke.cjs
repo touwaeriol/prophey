@@ -110,6 +110,7 @@ app.on('browser-window-created', (_event, window) => {
       await require('./ask-panel-smoke.cjs')(evaluate, until)
       await require('./session-switch-smoke.cjs')(evaluate, until, window)
       await require('./image-copy-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
+      await require('./session-messages-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./queue-smoke.cjs')(evaluate, until, window)
       await require('./session-panel-smoke.cjs')(evaluate, until, window)
       await require('./session-title-smoke.cjs')(evaluate, until)

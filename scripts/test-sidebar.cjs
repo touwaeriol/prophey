@@ -15,7 +15,12 @@ if (!process.versions.electron) {
   const sessions = titles.map((title, i) => {
     const id = 'proof_' + i, cwd = dirs[0], file = path.join(data, 'transcripts', id + '.jsonl')
     const multi = i < 3, additional = multi ? [dirs[1]] : []
-    fs.writeFileSync(file, JSON.stringify({ type: 'header', sessionId: id, workspace: { primary: cwd, additional } }) + '\n')
+    const header = JSON.stringify({ type: 'header', sessionId: id, workspace: { primary: cwd, additional } }) + '\n'
+    // Two sessions carry a sentinel message, so switching can be checked to show the right transcript.
+    const body = i === 0 || i === 6
+      ? JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: 'MESSAGE_PROOF_' + i }] } }) + '\n'
+      : ''
+    fs.writeFileSync(file, header + body)
     return { id, key: id, path: file, engine: ['prophey', 'pi', 'claude'][i % 3], title, cwd, additional, ...(multi ? { projectId: 'fullstack' } : {}), createdAt: 1, updatedAt: Date.now() - i * 1000 }
   })
   fs.writeFileSync(path.join(data, 'sessions.json'), JSON.stringify({ sessions }))
@@ -152,6 +157,13 @@ if (!process.versions.electron) {
           await evaluate('Array.from(document.querySelectorAll(".project-group"), g => g.dataset.groupKey)'),
           keysBefore,
           'directory groups keep their order when switching'
+        )
+        // The conversation follows the session that was opened, never the one left behind.
+        await until('document.body.textContent.includes("MESSAGE_PROOF_6")', 'opened transcript')
+        assert.equal(
+          await evaluate('document.body.textContent.includes("MESSAGE_PROOF_0")'),
+          false,
+          'the previous session\'s transcript must not stay on screen'
         )
 
         win.webContents.reload()

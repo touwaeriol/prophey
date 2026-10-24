@@ -44,6 +44,7 @@ import {
 } from './lib/session-composer'
 import { updateStatusText } from './lib/updates'
 import { toChatItems, type ChatItem } from './lib/messages'
+import { messagesBelong } from './lib/session-messages'
 import { applyConversationEvent } from './lib/conversation-events'
 
 /** Draft, images and queue of every conversation, keyed by sidebar session key. */
@@ -462,16 +463,25 @@ export default function App(): React.JSX.Element {
     [activeProjectId, askConfirm, projects, loadProjects]
   )
   const messagesRequest = useRef(0)
-  const loadMessages = useCallback(async () => {
+  const loadMessages = useCallback(async (attempt = 0) => {
     const request = ++messagesRequest.current
     const owner = statusRef.current
     const isCurrent = (): boolean => request === messagesRequest.current &&
       statusRef.current.phase === 'ready' && !statusRef.current.switchingEngine &&
       statusRef.current.engine === owner.engine && statusRef.current.sessionFile === owner.sessionFile
     try {
-      const messages = await window.pi.getMessages()
+      const payload = await window.pi.getMessages()
+      // The engine names the session it answered from. While a switch is in flight it can still
+      // hold the previous transcript; painting that under the new title is the "conversation from
+      // another directory" bug. Wait for it instead of showing the wrong conversation.
+      if (!messagesBelong(payload.sessionKey, owner)) {
+        if (attempt < 20 && request === messagesRequest.current) {
+          window.setTimeout(() => void loadMessages(attempt + 1), 150)
+        }
+        return
+      }
       if (!isCurrent()) return
-      setItems(toChatItems(messages))
+      setItems(toChatItems(payload.messages))
       setStick(true)
       const stats = await window.pi.getSessionStats().catch(() => undefined)
       if (!isCurrent()) return
@@ -613,6 +623,18 @@ export default function App(): React.JSX.Element {
     void loadMessages()
     void loadSessions()
   }, [status.phase, status.sessionFile, status.sessionKey, status.engine, loadMessages, loadSessions])
+
+  // Never leave the previous session's transcript on screen while the next one loads: a dropped or
+  // late answer must show an empty conversation, not another directory's messages.
+  const shownSession = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (status.phase !== 'ready') return
+    const key = status.sessionKey ?? status.sessionFile
+    if (!key || shownSession.current === key) return
+    shownSession.current = key
+    setItems([])
+    setStick(true)
+  }, [status.phase, status.sessionKey, status.sessionFile])
 
   /**
    * Auto-compaction decides what counts as "full", so re-read the usage whenever the trigger moves
