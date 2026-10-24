@@ -192,9 +192,17 @@ module.exports = async function imageCopySmoke(evaluate, until, window, setSessi
         setSessionFixture(undefined)
         if (sessionInjected) contents.send('pi:status', idle)
         if (attachedHere) contents.debugger.detach()
+      } catch (error) {
+        // The window may already be gone; cleanup must not mask the real result.
+        console.warn('image copy cleanup skipped:', error instanceof Error ? error.message : error)
       } finally {
-        if (saved.length) await clipboard.write(saved.map(payloads => new ClipboardItem(payloads)))
-        else clipboard.clear()
+        try {
+          if (saved.length) await clipboard.write(saved.map(payloads => new ClipboardItem(payloads)))
+          else clipboard.clear()
+        } catch (error) {
+          // CI runners can lock the OS clipboard; restoring it is best effort.
+          console.warn('image clipboard restore skipped:', error instanceof Error ? error.message : error)
+        }
       }
     }
   }

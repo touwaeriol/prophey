@@ -16,9 +16,11 @@ const env = { ...process.env, PROPHEY_SMOKE_ROOT: root, PROPHEY_SMOKE_DATA: user
 delete env.ELECTRON_RUN_AS_NODE
 delete env.ELECTRON_RENDERER_URL
 delete env.PI_DEBUG_PORT
-const child = spawn(require('electron'), [path.join(root, 'tests/electron-smoke.cjs')], { env, stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true })
+const child = spawn(require('electron'), [path.join(root, 'tests/electron-smoke.cjs')], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
 let output = ''
 child.stdout.on('data', chunk => { output += chunk; process.stdout.write(chunk) })
+// Assertion errors go to stderr; keep them in the captured tail so CI annotations show them.
+child.stderr.on('data', chunk => { output += chunk; process.stderr.write(chunk) })
 const timer = setTimeout(() => {
   if (process.platform === 'win32') require('node:child_process').spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
   else child.kill('SIGKILL')
