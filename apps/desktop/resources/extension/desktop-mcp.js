@@ -20,6 +20,7 @@ const PROMPT_SECTION = 'desktop_tools'
 const AGENTS_SECTION = 'subagents'
 const WEB_SECTION = 'web_tools'
 const PROJECT_SECTION = 'project'
+const CONVENTIONS_SECTION = 'conventions'
 
 /**
  * Guidelines, not a section: `systemPromptOptions.promptGuidelines` are rendered as bullets in the
@@ -222,6 +223,9 @@ export default function desktopMcp(pi) {  const url = process.env.AGENT_DESKTOP_
   const subagentsEnabled = process.env.AGENT_DESKTOP_SUBAGENTS === '1'
   const agentsSection = process.env.AGENT_DESKTOP_AGENTS_SECTION ?? ''
   const projectText = projectSection(process.env.AGENT_DESKTOP_PROJECT, engines)
+  // Rules the repository wrote for Cursor / Copilot / Gemini / Cline / Aider and friends. pi itself
+  // only loads AGENTS.md and CLAUDE.md, so the desktop reads these and hands them over here.
+  const conventionsText = process.env.AGENT_DESKTOP_CONVENTIONS ?? ''
   // Several engines can be alive at once (a run parked in the background). Subagent notices are
   // addressed to one session, so this process has to know which one it is.
   let sessionFile
@@ -234,9 +238,10 @@ export default function desktopMcp(pi) {  const url = process.env.AGENT_DESKTOP_
   })
   // Prompt- and request-level, so neither may depend on the bridge: the built-in servers can be off.
   registerSpeed(pi)
-  if (projectText) {
+  if (projectText || conventionsText) {
     pi.on('before_agent_start', (event) => {
-      event.systemPromptOptions.sections[PROJECT_SECTION] = projectText
+      if (projectText) event.systemPromptOptions.sections[PROJECT_SECTION] = projectText
+      if (conventionsText) event.systemPromptOptions.sections[CONVENTIONS_SECTION] = conventionsText
     })
   }
   if (!url) return

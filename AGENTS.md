@@ -286,6 +286,17 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - 工作目录是**会话级**的：点击其他项目的会话必须走 `pi:open-session`（以该会话 cwd + `--session <path>` 重启 pi），不能只用 `switch_session`，否则工具会在错误目录运行。设置页只读显示当前会话目录，不提供全局工作目录编辑。
 - `config.json` 保存 `{ cwd, mcp }`（`sessionMode` 已是历史字段）；`cwd` 只是下次启动/新建会话的默认目录。目录不存在时 `startPi` 会回退到 home，避免 spawn ENOENT。
 
+## 通用 AI agent 规范文件（AGENTS.md 之外）
+
+- pi 只认 `AGENTS.override.md` / `AGENTS.md` / `AGENTS.md`(大小写变体) / `CLAUDE.md`（见 pi 的 `resource-loader`），所以仓库写给别的工具的规则原本整个会话都读不到。现在由桌面端读出来统一注入。
+- 采集器：`apps/desktop/src/main/agent/project-conventions.ts`（纯函数 + 可注入 io，测试 `tests/project-conventions.test.cjs`）。**不要重复注入 AGENTS.md / CLAUDE.md**，否则同一套规则会发两遍。
+- 支持清单（`SOURCES`，加新工具只改这里）：`GEMINI.md`(Gemini CLI)、`CONVENTIONS.md`(Aider)、`.goosehints`(Goose)、`.cursorrules` + `.cursor/rules/*.md|mdc`(Cursor)、`.github/copilot-instructions.md` + `.github/instructions/*.md`(Copilot)、`.windsurfrules` + `.windsurf/rules/*.md`、`.clinerules`（文件或目录）、`.roo/rules/*.md`(Roo Code)、`.continue/rules/*.md`、`.kiro/steering/*.md`、`.amazonq/rules/*.md`、`.trae/rules/*.md`、`.junie/guidelines.md`、`AGENT.md`。
+- 目录形态的规则只看 `.md` / `.mdc`（`.txt` 不算规则）；Cursor `.mdc` 的 YAML frontmatter 会被剥掉，`description:` 变成文件标签（`Cursor · 样式与命名`），模型据此区分两套规则。
+- **就近优先**：从工作目录往上最多找 2 层，只取最近的、含任一规范文件的目录；子包不会同时叠加 monorepo 根的另一套规则。
+- 预算：单文件 12k 字符、整段 24k 字符，超出截断并标 `…（已截断）`；空文件跳过，不生成空章节。
+- 通道：pi 走 `AGENT_DESKTOP_CONVENTIONS` 环境变量 → 扩展 `desktop-mcp.js` 的 `before_agent_start` 写 `systemPromptOptions.sections.conventions`（和 `project` 章节并列，测试 `tests/extension-conventions.test.cjs`）；内置 Prophey 引擎在 `start()` 时读一次并拼进 `systemPrompt()`。
+- Claude / Codex 原生引擎没有注入入口，仍由它们自己的 SDK 读 `CLAUDE.md` / `AGENTS.md`；规范文件改动后需要重启会话（读取发生在引擎启动时）。
+
 ## MCP & desktop tools
 
 - 桌面提问工具 `ask_user_question` 是一条自建链路，四段：

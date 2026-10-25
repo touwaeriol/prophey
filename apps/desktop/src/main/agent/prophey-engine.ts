@@ -11,6 +11,7 @@ import * as providers from '../providers'
 import * as speed from '../speed'
 import type { TranscriptStore, StoredTranscript } from '../transcript-store'
 import { loadMcpTools } from './mcp-client'
+import { readProjectConventions } from './project-conventions'
 import { orderToolResults } from './transcript-order'
 import {
   bridgeContext,
@@ -28,6 +29,11 @@ export class PropheyEngine implements AgentEngine {
 
   private snapshot: PiStatus = { phase: 'stopped', cwd: process.cwd() }
   private roots: AgentWorkspace = { primary: process.cwd(), additional: [] }
+  /**
+   * Repository rules written for other agents (GEMINI.md, .cursorrules, copilot-instructions…).
+   * Read once per start, the way pi reads AGENTS.md when it launches.
+   */
+  private conventions = ''
   private isBusy = false
   /** Set by `steer()`: the running loop must answer one more round before it settles. */
   private steerPending = false
@@ -146,6 +152,7 @@ export class PropheyEngine implements AgentEngine {
         ? { primary: workspace, additional: [] }
         : (workspace ?? this.roots)
     this.roots = { primary: wanted.primary, additional: [...wanted.additional] }
+    this.conventions = readProjectConventions(wanted.primary).text
     this.tools = undefined
     this.snapshot = { phase: 'ready', cwd: wanted.primary, isStreaming: false, compacting: false,
       thinkingLevel: this.snapshot.thinkingLevel }
@@ -759,6 +766,7 @@ ${text.trim()}`,
       '越界（`..`、绝对路径、符号出根）会被拒绝；目录清单已在上方列出，不必再调用 workspace_roots。',
       '改文件前先读，改完再读回确认；命令用 run_bash 并指明目录。',
       '长命令会后台执行，输出写入日志。完成通知不包含完整输出；需要时用 read_bash_task 的游标增量读取，避免重复读取日志。任务需要命令结果时，应等待完成后再下结论。',
+      this.conventions,
       this.options.appendSystemPrompt ?? ''
     ].filter(line => line !== '').join('\n')
   }

@@ -5,6 +5,8 @@
  */
 export const SIDEBAR_OPEN_KEY = 'pi-sidebar-open'
 export const PANEL_OPEN_KEY = 'pi-session-panel'
+/** Width the user dragged the sidebar to, in CSS pixels. */
+export const SIDEBAR_WIDTH_KEY = 'pi-sidebar-width'
 
 /** The slice of `Storage` we need, so tests can pass a fake. */
 export type FlagStore = {
@@ -49,5 +51,34 @@ export function writeLayoutFlag(
     store?.setItem(key, value ? '1' : '0')
   } catch {
     // quota / private mode: the layout just starts from the default next time
+  }
+}
+
+/** A clamped pixel size (sidebar width); anything unreadable means the caller's default. */
+export function readLayoutNumber(
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+  store: FlagStore | undefined = defaultStore()
+): number {
+  try {
+    const raw = Number(store?.getItem(key))
+    if (!Number.isFinite(raw) || raw <= 0) return fallback
+    return Math.min(max, Math.max(min, Math.round(raw)))
+  } catch {
+    return fallback
+  }
+}
+
+export function writeLayoutNumber(
+  key: string,
+  value: number,
+  store: FlagStore | undefined = defaultStore()
+): void {
+  try {
+    store?.setItem(key, String(Math.round(value)))
+  } catch {
+    // quota / private mode: the width just starts from the default next time
   }
 }

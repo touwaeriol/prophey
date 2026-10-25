@@ -15,6 +15,7 @@ import path from 'node:path'
 import { ClaudeCodeEngine } from './agent/claude-engine'
 import { CodexEngine } from './agent/codex-engine'
 import { PropheyEngine } from './agent/prophey-engine'
+import { readProjectConventions } from './agent/project-conventions'
 import { PiEngine } from './agent/pi-engine'
 import { idleBeforeSwitch } from './agent/switch-guard'
 import { listSessions, readSummary } from './sessions'
@@ -528,6 +529,10 @@ function createEngine(record?: SessionRecord): AgentEngine {
           })
         }
         env.PI_CODING_AGENT_DIR = profile.agentDir()
+        // Rules the repository wrote for other agents (GEMINI.md, .cursorrules, copilot-instructions…);
+        // pi only loads AGENTS.md / CLAUDE.md, so the extension injects these as their own section.
+        const conventions = readProjectConventions(workspace.primary).text
+        if (conventions) env.AGENT_DESKTOP_CONVENTIONS = conventions
         return { args: launch.args, env }
       },
       sessionArgs: () => record ? ['--session', record.path] : sessionArgs(),

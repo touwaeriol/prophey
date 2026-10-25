@@ -36,13 +36,14 @@ import {
   adoptComposer,
   composerFor,
   composerKey,
+  isEmptyComposer,
   LOCAL_COMPOSER_KEY,
   parseComposers,
   patchComposer,
   serializeComposers,
   type SessionComposerMap
 } from './lib/session-composer'
-import { PANEL_OPEN_KEY, SIDEBAR_OPEN_KEY, readLayoutFlag, writeLayoutFlag } from './lib/layout-prefs'
+import { PANEL_OPEN_KEY, SIDEBAR_OPEN_KEY, SIDEBAR_WIDTH_KEY, readLayoutFlag, readLayoutNumber, writeLayoutFlag, writeLayoutNumber } from './lib/layout-prefs'
 import { updateStatusText } from './lib/updates'
 import { toChatItems, type ChatItem } from './lib/messages'
 import { messagesBelong } from './lib/session-messages'
@@ -57,6 +58,13 @@ import { applyConversationEvent } from './lib/conversation-events'
 
 /** Draft, images and queue of every conversation, keyed by sidebar session key. */
 const COMPOSER_STORAGE_KEY = 'pi-session-composer'
+/**
+ * Text typed in a session that was never started.
+ *
+ * Such a session has no history, so its draft would be stranded the moment the sidebar stops
+ * listing it. It rides along instead: the next new session opens with it already in the box.
+ */
+const PENDING_DRAFT_KEY = 'pi-pending-new-draft'
 
 /**
  * The message a reader is actually looking at: the first one whose bottom edge is inside the
@@ -160,6 +168,50 @@ export default function App(): React.JSX.Element {
     if (!activePath) return
     setComposers((map) => adoptComposer(map, LOCAL_COMPOSER_KEY, composerKey(activePath)))
   }, [activePath])
+  /**
+   * The draft of a session that never started, kept so the next new session opens with it.
+   *
+   * Mirrored into local storage: the session itself may disappear from the list (it has no
+   * history), and the text must survive that — and a restart — anyway.
+   */
+  const pendingDraftRef = useRef<string>((() => {
+    try {
+      return localStorage.getItem(PENDING_DRAFT_KEY) ?? ''
+    } catch {
+      return ''
+    }
+  })())
+  const rememberPendingDraft = useCallback((text: string): void => {
+    if (pendingDraftRef.current === text) return
+    pendingDraftRef.current = text
+    try {
+      if (text) localStorage.setItem(PENDING_DRAFT_KEY, text)
+      else localStorage.removeItem(PENDING_DRAFT_KEY)
+    } catch {
+      // storage refused the write: the ref still covers this window's lifetime
+    }
+  }, [])
+  useEffect(() => {
+    // A session with no messages yet is still "the new session": its text keeps riding along.
+    // The moment it has a message the text belongs to that session and the pending copy is gone.
+    if (items.length > 0) rememberPendingDraft('')
+    else if (draft) rememberPendingDraft(draft)
+  }, [draft, items.length, rememberPendingDraft])
+  /**
+   * Hand the pending text to the session that is about to be created.
+   *
+   * It goes to the pre-session composer on purpose: the adopt effect below moves it onto whatever
+   * session the engine reports, so the new conversation opens with the text the user already typed.
+   */
+  const carryPendingDraft = useCallback((): void => {
+    const text = pendingDraftRef.current
+    if (!text) return
+    setComposers((map) =>
+      isEmptyComposer(map[LOCAL_COMPOSER_KEY])
+        ? patchComposer(map, LOCAL_COMPOSER_KEY, { draft: text })
+        : map
+    )
+  }, [])
   useEffect(() => {
     try {
       localStorage.setItem(COMPOSER_STORAGE_KEY, serializeComposers(composers))
@@ -193,6 +245,12 @@ export default function App(): React.JSX.Element {
     writeLayoutFlag(SIDEBAR_OPEN_KEY, sidebarOpen)
   }, [sidebarOpen])
   /** Right-hand inspector; persisted so the layout survives a restart like the sidebar does. */
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    readLayoutNumber(SIDEBAR_WIDTH_KEY, 280, 220, 520)
+  )
+  useEffect(() => {
+    writeLayoutNumber(SIDEBAR_WIDTH_KEY, sidebarWidth)
+  }, [sidebarWidth])
   const [panelOpen, setPanelOpen] = useState(() => readLayoutFlag(PANEL_OPEN_KEY, false))
   useEffect(() => {
     writeLayoutFlag(PANEL_OPEN_KEY, panelOpen)
@@ -865,6 +923,7 @@ export default function App(): React.JSX.Element {
    */
 
   const newSession = useCallback(async () => {
+    carryPendingDraft()
     const result = await window.pi.newSession({ stop: true })
     if (!result.ok) {
       setToast(result.error ?? '无法新建会话')
@@ -872,7 +931,7 @@ export default function App(): React.JSX.Element {
     }
     setItems([])
     void loadSessions()
-  }, [loadSessions])
+  }, [loadSessions, carryPendingDraft])
 
   const closeBtw = useCallback(async () => {
     if (!btwChatRef.current) return
@@ -1222,6 +1281,7 @@ export default function App(): React.JSX.Element {
   }, [loadProjects, loadSessions])
 
   const openRecentWorkspace = useCallback(async (cwd: string): Promise<void> => {
+    carryPendingDraft()
     const next = await window.pi.newProjectSession(cwd, { stop: true })
     if (next.phase === 'error') throw new Error(next.error ?? '无法打开目录')
     setStatus(next)
@@ -1231,7 +1291,7 @@ export default function App(): React.JSX.Element {
     setToast(`已在 ${cwd} 新建会话`)
     await loadProjects()
     void loadSessions()
-  }, [loadProjects, loadSessions])
+  }, [loadProjects, loadSessions, carryPendingDraft])
 
   const newSessionInProject = useCallback(
     async (cwd: string) => {
@@ -1284,6 +1344,8 @@ export default function App(): React.JSX.Element {
           activePath={activePath}
           status={status}
           theme={theme}
+          width={sidebarWidth}
+          onResize={setSidebarWidth}
           canGoBack={historyNav.canBack}
           canGoForward={historyNav.canForward}
           onBack={() => goHistory(-1)}
@@ -1320,14 +1382,9 @@ export default function App(): React.JSX.Element {
           streaming={Boolean(status.isStreaming || status.compacting)}
           panelOpen={panelOpen}
           sidebarOpen={sidebarOpen}
-          subagentsRunning={subagents.filter(isSubagentRunning).length}
-          subagentsFinished={
-            subagents.filter((record) => !record.restored && record.status === 'idle').length
-          }
           onNew={() => void chooseWorkspace()}
           onToggleSidebar={() => setSidebarOpen((value) => !value)}
           onTogglePanel={() => setPanelOpen((value) => !value)}
-          onOpenSubagents={() => setSubagentsOpen(true)}
         />
 
         {status.phase === 'error' && (

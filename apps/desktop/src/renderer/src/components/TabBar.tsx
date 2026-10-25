@@ -1,6 +1,6 @@
 import { engineLabel } from '@shared/engine'
 import type { PiStatus } from '@shared/types'
-import { BranchIcon, CloseIcon, ListIcon, PanelIcon, PlusIcon, SparkIcon } from './Icons'
+import { BranchIcon, CloseIcon, ListIcon, PanelIcon, PlusIcon } from './Icons'
 
 export function TabBar({
   title,
@@ -8,24 +8,18 @@ export function TabBar({
   streaming,
   panelOpen,
   sidebarOpen,
-  subagentsRunning,
-  subagentsFinished,
   onNew,
   onToggleSidebar,
-  onTogglePanel,
-  onOpenSubagents
+  onTogglePanel
 }: {
   title: string
   status: PiStatus
   streaming: boolean
   panelOpen: boolean
   sidebarOpen: boolean
-  subagentsRunning: number
-  subagentsFinished: number
   onNew: () => void
   onToggleSidebar: () => void
   onTogglePanel: () => void
-  onOpenSubagents: () => void
 }) {
   return (
     <header className="tabbar">
@@ -62,20 +56,6 @@ export function TabBar({
                 : '已停止'}
           </span>
         )}
-        <button
-          className={`subagent-btn ${subagentsRunning > 0 ? 'running' : ''}`}
-          title={
-            subagentsRunning > 0
-              ? `${subagentsRunning} 个子代理运行中`
-              : subagentsFinished > 0
-                ? `${subagentsFinished} 个子代理已完成`
-                : '子代理'
-          }
-          onClick={onOpenSubagents}
-        >
-          <SparkIcon size={13} />
-          <span>{subagentsRunning > 0 ? subagentsRunning : subagentsFinished || ''}</span>
-        </button>
         <button
           className={`icon-btn panel-toggle ${panelOpen ? 'on' : ''}`}
           title={

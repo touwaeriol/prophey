@@ -15,6 +15,7 @@ import {
   FolderIcon,
   MoonIcon,
   PanelIcon,
+  PinIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -26,6 +27,43 @@ import {
 } from '../lib/session-groups'
 
 const PAGE_SIZE = 10
+const MIN_SIDEBAR_WIDTH = 220
+const MAX_SIDEBAR_WIDTH = 520
+
+/**
+ * Drag the right edge of the session list.
+ *
+ * The handle keeps pointer capture so the drag survives the cursor running ahead of a repaint, and
+ * the width is clamped: the conversation must never be squeezed out of the window.
+ */
+function startResize(
+  event: React.PointerEvent<HTMLDivElement>,
+  width: number,
+  onResize: (width: number) => void
+): void {
+  event.preventDefault()
+  const startX = event.clientX
+  const startWidth = width
+  try {
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  } catch {
+    // synthetic events have no pointer to capture; the window listeners still carry the drag
+  }
+  document.body.classList.add('resizing-sidebar')
+  const move = (moveEvent: PointerEvent): void => {
+    const next = startWidth + (moveEvent.clientX - startX)
+    onResize(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(next))))
+  }
+  const finish = (): void => {
+    document.body.classList.remove('resizing-sidebar')
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', finish)
+  window.addEventListener('pointercancel', finish)
+}
 const PREFS_KEY = 'pi-sidebar-prefs'
 const ARCHIVE_KEY = 'pi-archived-sessions'
 const PINNED_KEY = 'pi-pinned-sessions'
@@ -134,6 +172,8 @@ export function Sidebar({
   activePath,
   status,
   theme,
+  width,
+  onResize,
   canGoBack,
   canGoForward,
   onBack,
@@ -164,6 +204,9 @@ export function Sidebar({
   activePath?: string
   status: PiStatus
   theme: 'dark' | 'light'
+  /** Sidebar width in px; the user drags the right edge to change it. */
+  width: number
+  onResize: (width: number) => void
   canGoBack: boolean
   canGoForward: boolean
   onBack: () => void
@@ -187,6 +230,7 @@ export function Sidebar({
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs)
   const [archived, setArchived] = useState<Set<string>>(loadArchived)
   const [pinned, setPinned] = useState<string[]>(loadPinned)
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('prophey-sidebar-collapsed') ?? '[]')) } catch { return new Set() }
   })
@@ -423,7 +467,18 @@ export function Sidebar({
   }
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={{ width, flexBasis: width }}>
+      <div
+        className="sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整会话栏宽度"
+        title="拖动调整宽度（双击恢复 280px）"
+        onPointerDown={(event) => startResize(event, width, onResize)}
+        onDoubleClick={() => onResize(280)}
+      >
+        <span className="sidebar-resizer-grip" aria-hidden="true" />
+      </div>
       <div className="sidebar-toolbar">
         <button className="icon-btn" title="隐藏会话列表" onClick={onCollapse}>
           <PanelIcon size={15} />
@@ -621,11 +676,19 @@ export function Sidebar({
       <div className="session-list">
       {pinnedSessions.length > 0 && (
         <div className="pinned-block">
-          <div className="section-label pinned-head">
-            <span>置顶</span>
+          <div className="pinned-head">
+            <button
+              className="pinned-toggle"
+              onClick={() => setPinnedCollapsed((value) => !value)}
+              aria-expanded={!pinnedCollapsed}
+              title={pinnedCollapsed ? '展开置顶' : '收起置顶'}
+            >
+              <ChevronIcon size={11} className={pinnedCollapsed ? '' : 'open'} />
+              <span>置顶</span>
+            </button>
             <span className="pinned-count">{pinnedSessions.length}</span>
           </div>
-          {pinnedSessions.map((session, index) => (
+          {!pinnedCollapsed && pinnedSessions.map((session, index) => (
             <div
               key={session.path}
               className={`pinned-item ${isSelected(session) ? 'active' : ''} ${isRunning(session) ? 'running' : ''}`}
@@ -646,6 +709,9 @@ export function Sidebar({
                 ? <span className={`session-dot current ${isRunning(session) ? 'running' : ''}`} role="img" aria-label={isRunning(session) ? '正在执行' : '当前会话'} />
                 : <span className="pinned-index">{index + 1}</span>}
               <span className="pinned-title">{session.title}</span>
+              {isRunning(session) && (
+                <span className="session-spinner" role="img" aria-label="正在执行" title="正在执行" />
+              )}
               <button
                 className="pinned-unpin"
                 title="取消置顶"
@@ -819,11 +885,25 @@ export function Sidebar({
                         <div className="session-main">
                           <span className="session-title">{session.title}</span>
                           {isArchived && <ArchiveIcon size={11} />}
+                          {isRunning(session) && (
+                            <span className="session-spinner" role="img" aria-label="正在执行" title="正在执行" />
+                          )}
                         </div>
                         <div
                           className="session-menu-wrap"
                           ref={sessionMenu === session.path ? sessionMenuRef : undefined}
                         >
+                          <button
+                            className={`session-pin-btn ${pinned.includes(session.path) ? 'on' : ''}`}
+                            title={pinned.includes(session.path) ? '取消置顶' : '置顶到顶部'}
+                            aria-pressed={pinned.includes(session.path)}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              togglePin(session.path)
+                            }}
+                          >
+                            <PinIcon size={12} />
+                          </button>
                           <button
                             className={`session-menu-btn ${sessionMenu === session.path ? 'open' : ''}`}
                             title="更多操作"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { engineLabel } from '@shared/engine'
 import type {
   ContextUsage,
@@ -193,6 +193,21 @@ export function SessionPanel({
   }, [backgroundTasks.length])
 
   const isOpen = (key: string): boolean => expanded[key] === true
+  /**
+   * Second level of the background-task card: opening a row shows that task's output right below it,
+   * instead of one shared block at the bottom of the card that belonged to whichever row was last
+   * clicked.
+   */
+  const taskDetail = (id: string): React.JSX.Element | null =>
+    selectedTask === id ? (
+      <div className="panel-task-detail">
+        <div className="panel-card-actions">
+          <span>命令输出 · 最近 12KB</span>
+          <button className="panel-link" onClick={() => setSelectedTask(undefined)}>关闭</button>
+        </div>
+        <pre>{taskOutput}</pre>
+      </div>
+    ) : null
   const toggle = (key: string): void =>
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
 
@@ -508,19 +523,29 @@ export function SessionPanel({
           }
         >
           {backgroundTasks.map((task) => (
-            <div className="panel-row" key={task.id} title={task.command}>
-              <span className="panel-dot running" aria-hidden="true" />
-              <button className="panel-link panel-row-main panel-row-ellipsis" title="查看命令输出" onClick={() => setSelectedTask(task.id)}>{task.command}</button>
-              <span className="panel-row-state">{formatElapsed(Date.now() - task.startedAt)}</span>
-              <button
-                className="panel-icon-btn"
-                title="停止这个后台命令"
-                disabled={busy === task.id}
-                onClick={() => void stopTask(task.id)}
-              >
-                <StopIcon size={11} />
-              </button>
-            </div>
+            <Fragment key={task.id}>
+              <div className="panel-row" title={task.command}>
+                <span className="panel-dot running" aria-hidden="true" />
+                <button
+                  className="panel-link panel-row-main panel-row-ellipsis"
+                  title={selectedTask === task.id ? '收起命令输出' : '查看命令输出'}
+                  aria-expanded={selectedTask === task.id}
+                  onClick={() => setSelectedTask(selectedTask === task.id ? undefined : task.id)}
+                >
+                  {task.command}
+                </button>
+                <span className="panel-row-state">{formatElapsed(Date.now() - task.startedAt)}</span>
+                <button
+                  className="panel-icon-btn"
+                  title="停止这个后台命令"
+                  disabled={busy === task.id}
+                  onClick={() => void stopTask(task.id)}
+                >
+                  <StopIcon size={11} />
+                </button>
+              </div>
+              {taskDetail(task.id)}
+            </Fragment>
           ))}
           {subagents.filter(isSubagentRunning).map(record => (
             <button className="panel-row panel-row-button" key={record.id} onClick={() => onOpenSubagent(record.id)} title="查看子代理详情">
@@ -536,19 +561,25 @@ export function SessionPanel({
             </button>
           )}
           {showFinished && (status.backgroundHistory ?? []).map(task => (
-            <button key={task.id} className="panel-row panel-row-button" onClick={() => setSelectedTask(task.id)}>
-              <span className="panel-row-main panel-row-ellipsis">{task.command}</span><span className="panel-row-state">{task.state === 'completed' ? '完成' : task.state === 'failed' ? '失败' : '停止'}</span>
-            </button>
+            <Fragment key={task.id}>
+              <button
+                className="panel-row panel-row-button"
+                aria-expanded={selectedTask === task.id}
+                onClick={() => setSelectedTask(selectedTask === task.id ? undefined : task.id)}
+              >
+                <span className="panel-row-main panel-row-ellipsis">{task.command}</span>
+                <span className="panel-row-state">
+                  {task.state === 'completed' ? '完成' : task.state === 'failed' ? '失败' : '停止'}
+                </span>
+              </button>
+              {taskDetail(task.id)}
+            </Fragment>
           ))}
           {showFinished && subagents.filter(record => !isSubagentRunning(record)).map(record => (
             <button key={record.id} className="panel-row panel-row-button" onClick={() => onOpenSubagent(record.id)}>
               <span className="panel-row-main">{record.label || record.agent || record.id}</span><span className="panel-row-state">子代理</span>
             </button>
           ))}
-          {selectedTask && <div className="panel-task-detail">
-            <div className="panel-card-actions"><span>命令输出 · 最近 12KB</span><button className="panel-link" onClick={() => setSelectedTask(undefined)}>关闭</button></div>
-            <pre>{taskOutput}</pre>
-          </div>}
         </PanelCard>
       </div>
     </aside>
