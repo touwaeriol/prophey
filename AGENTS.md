@@ -49,6 +49,7 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - `SessionSummary` 携带 `projectId/additional`，从 SessionStore 透传。项目标题右侧 `+` 创建该项目的新会话；目录分组的 `+` 只创建单目录会话，清除之前项目的归属。项目选择器统一放进列表，不再使用顶部横向项目 chips。
 - 侧栏“新项目”的目录选择器：去重后只有一个目录时直接创建普通会话，不保存一个空的单目录项目。多目录时创建项目。“管理项目目录”使用中立的目录/默认工作目录文案。
 - 会话行固定约 30px，标题占主要宽度，时间与引擎移入 title 提示；选中态用底色，菜单在悬停/键盘聚焦时显示。置顶与列表共用滚动区，置顶会话不重复出现。`node scripts/test-sidebar.cjs` 用隔离 Electron 验证并输出亮暗主题截图至 `artifacts/sidebar/`。
+- **左侧列表和右侧概览用同一套卡片语言**：`.sidebar-nav`、`.pinned-block`、每个 `.project-group` 都是 `border: 1px solid var(--border)` + `border-radius: 10px` + `background: var(--bg-elev)` 的卡片（对齐 `.panel-card`），卡头一行「名称 —— 数量」，卡内是 30px 行；`.section-label`/`.sidebar-section-label` 只是卡片之间的分隔标签。样式集中在 `styles.css` 末尾的 sidebar-as-folded-cards 段，改这里之前先看 `scripts/test-sidebar-cards.cjs`（真实 Electron，断言卡面/圆角/行高/选中 chip 并输出 `artifacts/sidebar-cards/{light,dark}.png`）。
 
 - 主题：`document.documentElement.dataset.theme` 为 `dark` / `light`，持久化在 localStorage `pi-desktop-theme`。样式全部走 `styles.css` 顶部的 CSS 变量；新增样式不要写死颜色，否则亮色主题会破。切换主题时同时调用 `app:set-theme` 同步 Electron 标题栏 overlay 颜色。
 - **窗口拖拽区里的按钮必须自己 `-webkit-app-region: no-drag`**：`.tabbar`、`.rail`、`.sidebar-head` 都是 `drag` 区，鼠标按下只会拖动窗口，事件不会落到按钮上。`.rail-btn`、`.tab-new`、`.tab-close`、`.sidebar-head .icon-btn` 都写了 `no-drag`，标题栏右侧的 `.tabbar-right .icon-btn`（会话概览 / 侧栏）和 `.subagent-btn` 曾经漏写，表现为“点侧栏按钮没反应”。注意 `element.click()`、`sendInputEvent` 和 CDP `Input.dispatchMouseEvent` 都会绕过拖拽区命中测试，验证必须用真实鼠标（`artifacts/os-click-retry-proof.cjs`）。

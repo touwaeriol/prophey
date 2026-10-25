@@ -615,7 +615,10 @@ export function Sidebar({
       <div className="session-list">
       {pinnedSessions.length > 0 && (
         <div className="pinned-block">
-          <div className="section-label">置顶</div>
+          <div className="section-label pinned-head">
+            <span>置顶</span>
+            <span className="pinned-count">{pinnedSessions.length}</span>
+          </div>
           {pinnedSessions.map((session, index) => (
             <div
               key={session.path}
@@ -688,6 +691,9 @@ export function Sidebar({
                     <ChevronIcon size={11} className={isCollapsed ? '' : 'open'} />
                     <span className="project-name">{group.label}</span>
                     {isProject && <span className="project-root-count">{group.rootCount} 个目录</span>}
+                    <span className="project-count" title={`${group.sessions.length} 个会话`}>
+                      {group.sessions.length}
+                    </span>
                   </button>
                   <div className="project-actions">
                     {group.cwd && (
