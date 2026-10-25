@@ -1,5 +1,5 @@
 import type { EngineCapabilities, EngineCommand } from '@shared/engine'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   AppUpdateSnapshot,
   AskAnswer,
@@ -47,10 +47,49 @@ import { PANEL_OPEN_KEY, SIDEBAR_OPEN_KEY, readLayoutFlag, writeLayoutFlag } fro
 import { updateStatusText } from './lib/updates'
 import { toChatItems, type ChatItem } from './lib/messages'
 import { messagesBelong } from './lib/session-messages'
+import {
+  recallScroll,
+  rememberScroll,
+  restoreScroll,
+  type SessionScroll,
+  type SessionScrollMap
+} from './lib/session-scroll'
 import { applyConversationEvent } from './lib/conversation-events'
 
 /** Draft, images and queue of every conversation, keyed by sidebar session key. */
 const COMPOSER_STORAGE_KEY = 'pi-session-composer'
+
+/**
+ * The message a reader is actually looking at: the first one whose bottom edge is inside the
+ * viewport, plus how far into it the viewport starts.
+ */
+function viewportAnchor(container: HTMLElement): { id: string; offset: number } | undefined {
+  const top = container.getBoundingClientRect().top
+  for (const node of container.querySelectorAll<HTMLElement>('[data-message-id]')) {
+    const box = node.getBoundingClientRect()
+    if (box.bottom <= top + 12) continue
+    const id = node.dataset.messageId
+    if (id) return { id, offset: box.top - top }
+  }
+  return undefined
+}
+
+/**
+ * Where a message sits inside the scroll box, or `null` when it is not rendered any more.
+ *
+ * A restored transcript can briefly hold two copies of the same id (the outgoing list is cleared in
+ * stages), so `near` — the offset the session was remembered at — picks the copy the reader meant.
+ */
+function messageOffset(container: HTMLElement, id: string, near?: number): number | null {
+  const top = container.getBoundingClientRect().top
+  const offsets = [...container.querySelectorAll<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`)]
+    .map((node) => node.getBoundingClientRect().top - top + container.scrollTop)
+  if (offsets.length === 0) return null
+  if (offsets.length === 1 || near === undefined) return offsets[0]
+  return offsets.reduce((best, offset) =>
+    Math.abs(offset - near) < Math.abs(best - near) ? offset : best
+  )
+}
 
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<PiStatus>({ phase: 'starting', cwd: '' })
@@ -231,6 +270,10 @@ export default function App(): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   stickRef.current = stick
+  /** Where each conversation was left, so reopening it lands on the same line (see lib/session-scroll). */
+  const scrollMemory = useRef<SessionScrollMap>(new Map())
+  /** A restore waiting for the incoming transcript to render; cleared once it is applied. */
+  const pendingScroll = useRef<{ key: string; scroll: SessionScroll } | null>(null)
 
   const userItems = useMemo(() => items.filter((item) => item.role === 'user'), [items])
   const outline = useMemo(() => buildOutline(items), [items])
@@ -630,6 +673,19 @@ export default function App(): React.JSX.Element {
     if (status.phase !== 'ready') return
     const key = status.sessionKey ?? status.sessionFile
     if (!key || shownSession.current === key) return
+    // Leave the outgoing transcript where it is (remembered per session) and plan the incoming one's
+    // restore before the items are cleared: the anchor is the point of switching back to a session.
+    const leaving = shownSession.current
+    const container = scrollRef.current
+    const leavingAnchor = container ? viewportAnchor(container) : undefined
+    rememberScroll(
+      scrollMemory.current,
+      leaving,
+      container,
+      leavingAnchor
+    )
+    const saved = recallScroll(scrollMemory.current, key)
+    pendingScroll.current = { key, scroll: saved ?? { top: 0, stuck: true } }
     shownSession.current = key
     setItems([])
     setContextUsage(undefined)
@@ -638,8 +694,30 @@ export default function App(): React.JSX.Element {
     setSubagentFocus(undefined)
     setCommandOutput(undefined)
     setToast(null)
-    setStick(true)
+    setStick(saved ? saved.stuck : true)
   }, [status.phase, status.sessionKey, status.sessionFile])
+
+  /**
+   * Apply the planned anchor once the incoming transcript is actually on screen. A layout effect so
+   * the user never sees the new conversation jump from the top; the second pass covers heights that
+   * settle after markdown and images lay out.
+   */
+  useLayoutEffect(() => {
+    const pending = pendingScroll.current
+    const container = scrollRef.current
+    if (!pending || !container) return
+    if (pending.key !== shownSession.current) {
+      pendingScroll.current = null
+      return
+    }
+    if (items.length === 0) return
+    pendingScroll.current = null
+    const locate = (id: string): number | null =>
+      messageOffset(container, id, pending.scroll.top + (pending.scroll.anchorOffset ?? 0))
+    restoreScroll(container, pending.scroll, locate)
+    const frame = requestAnimationFrame(() => restoreScroll(container, pending.scroll, locate))
+    return () => cancelAnimationFrame(frame)
+  }, [items])
 
   /**
    * Auto-compaction decides what counts as "full", so re-read the usage whenever the trigger moves

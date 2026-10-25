@@ -70,14 +70,11 @@ interface GroupOptions {
   cwd: string
   activeProject?: Project
   projects?: Project[]
-  /** Path of the session open in the window; promoted to the top of its own group. */
-  activePath?: string
 }
 
 /** View policy shared by every grouping mode, independent of DOM and persisted preferences. */
 export function buildSessionGroups({
-  sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd, activeProject, projects = [],
-  activePath
+  sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd, activeProject, projects = []
 }: GroupOptions): SessionGroup[] {
   const catalogue = new Map(projects.map(project => [project.id, project]))
   if (activeProject) catalogue.set(activeProject.id, activeProject)
@@ -118,12 +115,10 @@ export function buildSessionGroups({
     })
     filtered.sort((a, b) => prefs.sort === 'name' ? a.title.localeCompare(b.title, 'zh-CN') :
       prefs.sort === 'created' ? b.createdAt - a.createdAt : b.updatedAt - a.updatedAt)
-    // The session in use leads its own directory under "最近活动"; explicit sorts keep their order.
-    // The directories themselves never move (see `born`/`groupOrder`).
-    const active = activePath && prefs.sort === 'activity'
-      ? filtered.findIndex(session => session.path === activePath)
-      : -1
-    if (active > 0) filtered.unshift(filtered.splice(active, 1)[0])
+    // Rows keep the order of their own sort key. Opening a session must not lift it to the top of
+    // its directory — a list that rearranges under the cursor is the bug, not a feature. Sessions
+    // past the first page are revealed by expanding the group (see the active-session effect in
+    // `Sidebar`), not by moving them.
     return { sessions: filtered, total: list.length, searching: !!needle,
       latest: list.reduce((max, session) => Math.max(max, session.updatedAt), 0),
       born: bornOf.get(key) ?? Number.POSITIVE_INFINITY }

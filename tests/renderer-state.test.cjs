@@ -5,7 +5,7 @@ const os = require('node:os')
 const path = require('node:path')
 const esbuild = require('esbuild')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'prophey-renderer-tests-'))
-for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'actions', 'subagents', 'layout-prefs']) {
+for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'session-scroll', 'actions', 'subagents', 'layout-prefs']) {
   esbuild.buildSync({ entryPoints: [path.resolve(__dirname, '../apps/desktop/src/renderer/src/lib', name + '.ts')], outfile: path.join(temp, name + '.cjs'), bundle: true, platform: 'node', format: 'cjs' })
 }
 after(() => fs.rmSync(temp, { recursive: true, force: true }))
@@ -13,6 +13,7 @@ const { applyConversationEvent: apply } = require(path.join(temp, 'conversation-
 const { toChatItems } = require(path.join(temp, 'messages.cjs'))
 const { insertFileMention } = require(path.join(temp, 'composer.cjs'))
 const { SIDEBAR_OPEN_KEY, PANEL_OPEN_KEY, readLayoutFlag, writeLayoutFlag } = require(path.join(temp, 'layout-prefs.cjs'))
+const { rememberScroll, recallScroll, restoreScroll, STICK_DISTANCE } = require(path.join(temp, 'session-scroll.cjs'))
 const event = (items, type, fields = {}) => apply(items, { type, ...fields }, 123)
 
 test('renderer: native string messages survive both streaming and session restore', () => {
@@ -157,24 +158,21 @@ test('renderer: switching sessions never reorders directories', () => {
   const touched = sessions.map((session) =>
     session.id === 'a1' ? { ...session, updatedAt: 5_000 } : session
   )
-  const after = buildSessionGroups({ ...plainOptions(touched), activePath: 'a1' }).map((group) => group.key)
+  const after = buildSessionGroups(plainOptions(touched)).map((group) => group.key)
   assert.deepEqual(after, before)
-  // ...and the open session now leads its own group.
-  const group = buildSessionGroups({ ...plainOptions(touched), activePath: 'a1' })
-    .find((entry) => entry.key === 'folder:c:/alpha')
-  assert.deepEqual(group.sessions.map((session) => session.id), ['a1'])
 })
 
-test('renderer: the open session leads its directory, name sort keeps its own order', () => {
+test('renderer: opening a session never lifts it to the top of its directory', () => {
   const sessions = [
     plainSession('a1', 'C:/alpha', 100, 900),
     plainSession('a2', 'C:/alpha', 110, 1000),
     plainSession('a3', 'C:/alpha', 120, 800)
   ]
-  const activity = buildSessionGroups({ ...plainOptions(sessions), activePath: 'a3' })[0]
-  assert.deepEqual(activity.sessions.map((session) => session.id), ['a3', 'a2', 'a1'])
+  // Rows stay on their own sort key: clicking `a3` must not move it under the cursor.
+  const activity = buildSessionGroups(plainOptions(sessions))[0]
+  assert.deepEqual(activity.sessions.map((session) => session.id), ['a2', 'a1', 'a3'])
 
-  const byName = buildSessionGroups({ ...plainOptions(sessions, { sort: 'name' }), activePath: 'a3' })[0]
+  const byName = buildSessionGroups(plainOptions(sessions, { sort: 'name' }))[0]
   assert.deepEqual(byName.sessions.map((session) => session.id), ['a1', 'a2', 'a3'])
 })
 
@@ -271,4 +269,40 @@ test('renderer: sidebar and panel layout flags round-trip and fall back to their
   const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } }
   assert.equal(readLayoutFlag(SIDEBAR_OPEN_KEY, true, broken), true)
   writeLayoutFlag(SIDEBAR_OPEN_KEY, false, broken)
+})
+
+ test('renderer: each conversation keeps its own scroll anchor, the tail stays the tail', () => {
+  const memory = new Map()
+  // Reading in the middle of a long transcript: the offset and the message at the top are kept.
+  rememberScroll(memory, 'session-a', { scrollTop: 640, scrollHeight: 4000, clientHeight: 800 }, { id: 'm12', offset: 40 })
+  assert.deepEqual(recallScroll(memory, 'session-a'), { top: 640, stuck: false, anchorId: 'm12', anchorOffset: 40 })
+  // A different session has no anchor yet: it opens at the bottom like a fresh session.
+  assert.equal(recallScroll(memory, 'session-b'), undefined)
+  // Following the tail is remembered as such, so reopening it lands on the newest message again.
+  rememberScroll(memory, 'session-b', { scrollTop: 3150, scrollHeight: 4000, clientHeight: 800 })
+  assert.deepEqual(recallScroll(memory, 'session-b'), { top: 3150, stuck: true })
+  // The threshold is the same one the on-scroll handler uses.
+  rememberScroll(memory, 'session-c', { scrollTop: 4000 - 800 - STICK_DISTANCE + 1, scrollHeight: 4000, clientHeight: 800 })
+  assert.equal(recallScroll(memory, 'session-c').stuck, true)
+  rememberScroll(memory, 'session-d', { scrollTop: 4000 - 800 - STICK_DISTANCE, scrollHeight: 4000, clientHeight: 800 })
+  assert.equal(recallScroll(memory, 'session-d').stuck, false)
+
+  // The anchor wins over the pixel offset, so a transcript that lays out a little differently
+  // still shows the line the reader was on.
+  const calls = []
+  const element = { scrollTop: 0, scrollHeight: 4000, scrollTo: (options) => calls.push(options) }
+  restoreScroll(element, { top: 640, stuck: false, anchorId: 'm12', anchorOffset: 40 }, () => 900)
+  assert.deepEqual(calls.pop(), { top: 860, behavior: 'instant' }, 'an anchor lands in one frame, not with a glide')
+  // A message that is no longer rendered falls back to the remembered pixel offset.
+  restoreScroll(element, { top: 640, stuck: false, anchorId: 'gone', anchorOffset: 40 }, () => null)
+  assert.deepEqual(calls.pop(), { top: 640, behavior: 'instant' })
+  // A session left at the tail goes to the end whatever the anchor says.
+  restoreScroll(element, { top: 640, stuck: true, anchorId: 'm12', anchorOffset: 40 }, () => 900)
+  assert.deepEqual(calls.pop(), { top: 4000, behavior: 'instant' })
+  const withoutScrollTo = { scrollTop: 0, scrollHeight: 4000 }
+  restoreScroll(withoutScrollTo, { top: 640, stuck: false })
+  assert.equal(withoutScrollTo.scrollTop, 640)
+  // An empty key (no session yet) must not write anything.
+  rememberScroll(memory, undefined, { scrollTop: 10, scrollHeight: 20, clientHeight: 10 })
+  assert.equal(memory.size, 4)
 })
