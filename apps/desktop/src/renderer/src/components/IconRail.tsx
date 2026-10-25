@@ -1,33 +1,23 @@
 import type { PiStatus } from '@shared/types'
-import {
-  CodeIcon,
-  FolderIcon,
-  MoonIcon,
-  PanelIcon,
-  PlusIcon,
-  SettingsIcon,
-  SparkIcon,
-  SunIcon
-} from './Icons'
+import { MoonIcon, PanelIcon, SettingsIcon, SparkIcon, SunIcon } from './Icons'
 
+/**
+ * The window rail. Only the list toggle lives up here, and only while the list is hidden; every
+ * create / workspace / config action sits in the sidebar itself, so the rail keeps just the
+ * logo, that toggle and the app-level controls pinned to the bottom edge.
+ */
 export function IconRail({
   status,
   theme,
   sidebarOpen,
-  onNew,
   onToggleSidebar,
-  onChooseWorkspace,
-  onOpenAgentDir,
   onOpenSettings,
   onToggleTheme
 }: {
   status: PiStatus
   theme: 'dark' | 'light'
   sidebarOpen: boolean
-  onNew: () => void
   onToggleSidebar: () => void
-  onChooseWorkspace: () => void
-  onOpenAgentDir: () => void
   onOpenSettings: () => void
   onToggleTheme: () => void
 }) {
@@ -36,25 +26,16 @@ export function IconRail({
       <div className="rail-logo" title="pi desktop">
         π
       </div>
-      <button className="rail-btn" title="新建会话 (Ctrl+N)" onClick={onNew}>
-        <PlusIcon size={17} />
-      </button>
       {!sidebarOpen && (
         <button
           className="rail-btn sidebar-toggle"
-          title="显示会话列表"
+          title="显示会话列表 (Ctrl+B)"
           aria-pressed={false}
           onClick={onToggleSidebar}
         >
           <PanelIcon size={16} />
         </button>
       )}
-      <button className="rail-btn" title="切换工作目录" onClick={onChooseWorkspace}>
-        <FolderIcon size={16} />
-      </button>
-      <button className="rail-btn" title="打开 pi 配置目录" onClick={onOpenAgentDir}>
-        <CodeIcon size={16} />
-      </button>
       <div className="rail-spacer" />
       <button
         className="rail-btn"

@@ -874,20 +874,26 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-foot">
-        <button
-          className="workspace"
-          onClick={onChooseWorkspace}
-          title={`${status.cwd}（切换目录并新建会话）`}
-        >
-          <FolderIcon size={14} />
-          <span className="workspace-name">{baseName(status.cwd) || status.cwd}</span>
-          <span className={`status-dot ${status.phase}`} />
-        </button>
-        <div className="status-line">
-          <span>
-            {engineLabel(status.engine)} {STATUS_TEXT[status.phase]}
-          </span>
-          {status.model && <span className="status-model">{status.model.id}</span>}
+        <div className="status-card">
+          <button
+            className="status-card-head"
+            onClick={onChooseWorkspace}
+            title={`${status.cwd}（切换工作目录）`}
+          >
+            <FolderIcon size={14} />
+            <span className="status-card-name">{baseName(status.cwd) || status.cwd}</span>
+            <span className={`status-dot ${status.phase}`} title={STATUS_TEXT[status.phase]} />
+          </button>
+          <div className="status-card-meta">
+            <span className={`status-pill ${status.phase}`} title={`内核${STATUS_TEXT[status.phase]}`}>
+              {engineLabel(status.engine)} · {STATUS_TEXT[status.phase]}
+            </span>
+            {status.model && (
+              <span className="status-model-pill" title={status.model.id}>
+                {status.model.id}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </aside>

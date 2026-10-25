@@ -1279,10 +1279,7 @@ export default function App(): React.JSX.Element {
         status={status}
         theme={theme}
         sidebarOpen={sidebarOpen}
-        onNew={() => void chooseWorkspace()}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
-        onChooseWorkspace={() => void chooseWorkspace()}
-        onOpenAgentDir={() => void window.pi.openAgentDir()}
         onOpenSettings={() => {
           setSettingsTab('providers')
           setSettingsOpen(true)
