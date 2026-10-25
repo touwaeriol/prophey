@@ -23,7 +23,7 @@ module.exports = async function checkWarpgrepCard(evaluate, until) {
     )
   }
 
-  await evaluate('document.querySelector("button[title=设置]").click()')
+  await evaluate('document.querySelector(\'.status-card-btn[title^="设置"]\').click()')
   await until(() => evaluate('!!document.querySelector(".settings")'), 'settings dialog')
   await evaluate(
     `Array.from(document.querySelectorAll('.settings-nav button')).find(b => b.textContent.trim() === 'MCP').click()`

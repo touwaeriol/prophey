@@ -57,7 +57,7 @@ app.on('browser-window-created', (_event, window) => {
       await until(() => evaluate('!!document.querySelector(".context-picker")'), 'context menu')
       await evaluate('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))')
       await until(() => evaluate('!document.querySelector(".context-picker")'), 'Escape dismiss')
-      await evaluate('document.querySelector("button[title=设置]").click()')
+      await evaluate('document.querySelector(\'.status-card-btn[title^="设置"]\').click()')
       await until(() => evaluate('!!document.querySelector(".settings")'), 'settings dialog')
       const nav = await evaluate('Array.from(document.querySelectorAll(".settings-nav button"), b => b.textContent).join(" ")')
       assert.match(nav, /服务商/)

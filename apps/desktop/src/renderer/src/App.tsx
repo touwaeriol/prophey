@@ -15,7 +15,6 @@ import type {
 } from '@shared/types'
 import { Conversation } from './components/Conversation'
 import { Composer } from './components/Composer'
-import { IconRail } from './components/IconRail'
 import { Sidebar } from './components/Sidebar'
 import { TabBar } from './components/TabBar'
 import { ProjectEditor } from './components/ProjectEditor'
@@ -1275,17 +1274,6 @@ export default function App(): React.JSX.Element {
 
   return (
     <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
-      <IconRail
-        status={status}
-        theme={theme}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((value) => !value)}
-        onOpenSettings={() => {
-          setSettingsTab('providers')
-          setSettingsOpen(true)
-        }}
-        onToggleTheme={() => setTheme((value) => (value === 'dark' ? 'light' : 'dark'))}
-      />
       {sidebarOpen && (
         <Sidebar
           sessions={sessions}
@@ -1295,6 +1283,7 @@ export default function App(): React.JSX.Element {
           recentRepos={recentRepos}
           activePath={activePath}
           status={status}
+          theme={theme}
           canGoBack={historyNav.canBack}
           canGoForward={historyNav.canForward}
           onBack={() => goHistory(-1)}
@@ -1321,6 +1310,7 @@ export default function App(): React.JSX.Element {
           onOpenAgentDir={() => void window.pi.openAgentDir()}
           onRestart={() => void restart()}
           onCollapse={() => setSidebarOpen(false)}
+          onToggleTheme={() => setTheme((value) => (value === 'dark' ? 'light' : 'dark'))}
         />
       )}
       <main className="main">
@@ -1329,11 +1319,13 @@ export default function App(): React.JSX.Element {
           status={status}
           streaming={Boolean(status.isStreaming || status.compacting)}
           panelOpen={panelOpen}
+          sidebarOpen={sidebarOpen}
           subagentsRunning={subagents.filter(isSubagentRunning).length}
           subagentsFinished={
             subagents.filter((record) => !record.restored && record.status === 'idle').length
           }
           onNew={() => void chooseWorkspace()}
+          onToggleSidebar={() => setSidebarOpen((value) => !value)}
           onTogglePanel={() => setPanelOpen((value) => !value)}
           onOpenSubagents={() => setSubagentsOpen(true)}
         />

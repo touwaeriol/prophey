@@ -87,8 +87,8 @@ if (!process.versions.electron) {
         throw Error('Timed out: ' + (label || source))
       }
       try {
-        await until('!!document.querySelector(".rail-btn[title=设置]")', 'icon rail')
-        await evaluate('document.querySelector(".rail-btn[title=设置]").click()')
+        await until('!!document.querySelector(".status-card-btn[title^=设置]")', 'status card settings')
+        await evaluate('document.querySelector(".status-card-btn[title^=设置]").click()')
         await until('!!document.querySelector(".provider-usage-value")', 'usage row')
         await until(
           '!document.querySelector(".provider-usage-value").textContent.includes("正在查询")',

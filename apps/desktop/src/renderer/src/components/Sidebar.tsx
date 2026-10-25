@@ -13,9 +13,12 @@ import {
   EllipsisIcon,
   FilterIcon,
   FolderIcon,
+  MoonIcon,
   PanelIcon,
   PlusIcon,
-  SearchIcon
+  SearchIcon,
+  SettingsIcon,
+  SunIcon
 } from './Icons'
 import {
   buildSessionGroups, baseName, pathKey, startOfDay,
@@ -130,6 +133,7 @@ export function Sidebar({
   recentRepos,
   activePath,
   status,
+  theme,
   canGoBack,
   canGoForward,
   onBack,
@@ -147,7 +151,8 @@ export function Sidebar({
   onOpenSettings,
   onOpenAgentDir,
   onRestart,
-  onCollapse
+  onCollapse,
+  onToggleTheme
 }: {
   sessions: SessionSummary[]
   /** Repository facts per working directory, used for the branch badge in each group head. */
@@ -158,6 +163,7 @@ export function Sidebar({
   recentRepos: string[]
   activePath?: string
   status: PiStatus
+  theme: 'dark' | 'light'
   canGoBack: boolean
   canGoForward: boolean
   onBack: () => void
@@ -176,6 +182,7 @@ export function Sidebar({
   onOpenAgentDir: () => void
   onRestart: () => void
   onCollapse: () => void
+  onToggleTheme: () => void
 }) {
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs)
   const [archived, setArchived] = useState<Set<string>>(loadArchived)
@@ -875,15 +882,28 @@ export function Sidebar({
 
       <div className="sidebar-foot">
         <div className="status-card">
-          <button
-            className="status-card-head"
-            onClick={onChooseWorkspace}
-            title={`${status.cwd}（切换工作目录）`}
-          >
-            <FolderIcon size={14} />
-            <span className="status-card-name">{baseName(status.cwd) || status.cwd}</span>
-            <span className={`status-dot ${status.phase}`} title={STATUS_TEXT[status.phase]} />
-          </button>
+          <div className="status-card-row">
+            <button
+              className="status-card-head"
+              onClick={onChooseWorkspace}
+              title={`${status.cwd}（切换工作目录）`}
+            >
+              <FolderIcon size={14} />
+              <span className="status-card-name">{baseName(status.cwd) || status.cwd}</span>
+            </button>
+            <div className="status-card-actions">
+              <button
+                className="status-card-btn"
+                title={theme === 'light' ? '切换到深色主题' : '切换到亮色主题'}
+                onClick={onToggleTheme}
+              >
+                {theme === 'light' ? <MoonIcon size={14} /> : <SunIcon size={14} />}
+              </button>
+              <button className="status-card-btn" title="设置（Ctrl+,）" onClick={onOpenSettings}>
+                <SettingsIcon size={14} />
+              </button>
+            </div>
+          </div>
           <div className="status-card-meta">
             <span className={`status-pill ${status.phase}`} title={`内核${STATUS_TEXT[status.phase]}`}>
               {engineLabel(status.engine)} · {STATUS_TEXT[status.phase]}
@@ -893,6 +913,7 @@ export function Sidebar({
                 {status.model.id}
               </span>
             )}
+            <span className={`status-dot ${status.phase}`} title={STATUS_TEXT[status.phase]} />
           </div>
         </div>
       </div>

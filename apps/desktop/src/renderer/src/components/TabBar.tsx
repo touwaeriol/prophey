@@ -1,15 +1,17 @@
 import { engineLabel } from '@shared/engine'
 import type { PiStatus } from '@shared/types'
-import { BranchIcon, CloseIcon, PanelIcon, PlusIcon, SparkIcon } from './Icons'
+import { BranchIcon, CloseIcon, ListIcon, PanelIcon, PlusIcon, SparkIcon } from './Icons'
 
 export function TabBar({
   title,
   status,
   streaming,
   panelOpen,
+  sidebarOpen,
   subagentsRunning,
   subagentsFinished,
   onNew,
+  onToggleSidebar,
   onTogglePanel,
   onOpenSubagents
 }: {
@@ -17,15 +19,27 @@ export function TabBar({
   status: PiStatus
   streaming: boolean
   panelOpen: boolean
+  sidebarOpen: boolean
   subagentsRunning: number
   subagentsFinished: number
   onNew: () => void
+  onToggleSidebar: () => void
   onTogglePanel: () => void
   onOpenSubagents: () => void
 }) {
   return (
     <header className="tabbar">
       <div className="tabs">
+        {!sidebarOpen && (
+          <button
+            className="icon-btn list-toggle"
+            title="显示会话列表 (Ctrl+B)"
+            aria-pressed={false}
+            onClick={onToggleSidebar}
+          >
+            <ListIcon size={15} />
+          </button>
+        )}
         <div className="tab active">
           <BranchIcon size={13} />
           <span className="tab-title">{title}</span>
