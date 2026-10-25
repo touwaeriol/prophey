@@ -11,8 +11,8 @@ import {
   ChevronIcon,
   CloseIcon,
   EllipsisIcon,
+  FilterIcon,
   FolderIcon,
-  MenuIcon,
   PanelIcon,
   PlusIcon,
   SearchIcon
@@ -418,8 +418,8 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-toolbar">
-        <button className="icon-btn" title="收起侧栏" onClick={onCollapse}>
-          <MenuIcon size={15} />
+        <button className="icon-btn" title="隐藏会话列表" onClick={onCollapse}>
+          <PanelIcon size={15} />
         </button>
         <button
           className={`icon-btn view-trigger ${menuOpen ? 'on' : ''} ${
@@ -431,7 +431,7 @@ export function Sidebar({
             setSection(null)
           }}
         >
-          <PanelIcon size={14} />
+          <FilterIcon size={14} />
         </button>
         <div className="toolbar-spacer" />
         <button className="icon-btn" title="上一个会话" disabled={!canGoBack} onClick={onBack}>

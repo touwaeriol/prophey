@@ -202,17 +202,6 @@ button:disabled {
   color: var(--text);
 }
 
-/* The rail's sidebar switch shows the same on/off chip as the title-bar one. */
-.rail-btn.on {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-
-.rail-btn.on:hover {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-
 .rail-btn.alert {
   color: var(--danger);
 }

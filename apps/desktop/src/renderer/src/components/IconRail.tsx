@@ -39,14 +39,16 @@ export function IconRail({
       <button className="rail-btn" title="新建会话 (Ctrl+N)" onClick={onNew}>
         <PlusIcon size={17} />
       </button>
-      <button
-        className={`rail-btn sidebar-toggle ${sidebarOpen ? 'on' : ''}`}
-        title={sidebarOpen ? '隐藏侧栏' : '显示侧栏'}
-        aria-pressed={sidebarOpen}
-        onClick={onToggleSidebar}
-      >
-        <PanelIcon size={16} />
-      </button>
+      {!sidebarOpen && (
+        <button
+          className="rail-btn sidebar-toggle"
+          title="显示会话列表"
+          aria-pressed={false}
+          onClick={onToggleSidebar}
+        >
+          <PanelIcon size={16} />
+        </button>
+      )}
       <button className="rail-btn" title="切换工作目录" onClick={onChooseWorkspace}>
         <FolderIcon size={16} />
       </button>

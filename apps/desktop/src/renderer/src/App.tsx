@@ -1316,14 +1316,12 @@ export default function App(): React.JSX.Element {
           title={title}
           status={status}
           streaming={Boolean(status.isStreaming || status.compacting)}
-          sidebarOpen={sidebarOpen}
           panelOpen={panelOpen}
           subagentsRunning={subagents.filter(isSubagentRunning).length}
           subagentsFinished={
             subagents.filter((record) => !record.restored && record.status === 'idle').length
           }
           onNew={() => void chooseWorkspace()}
-          onToggleSidebar={() => setSidebarOpen((value) => !value)}
           onTogglePanel={() => setPanelOpen((value) => !value)}
           onOpenSubagents={() => setSubagentsOpen(true)}
         />
