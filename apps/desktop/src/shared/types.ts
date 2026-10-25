@@ -328,6 +328,11 @@ export interface DesktopConfig {
   codexSandbox?: "read-only" | "workspace-write";
   /** Codex's experimental question tool (default on). */
   codexRequestUserInput?: boolean;
+  /**
+   * Predict the user's next message after a turn settles (default off: it costs one small request
+   * per turn). Claude Code produces this natively, everything else through a metadata request.
+   */
+  suggestions?: boolean;
   /** What the active engine supports, so the window can hide the rest. */
   capabilities?: EngineCapabilities;
 }
@@ -744,6 +749,8 @@ export interface PiBridge {
   setBraveApiKey(key: string | null): Promise<McpState>;
   setWebSearchMode(mode: WebSearchMode): Promise<McpState>;
   setProviderWebSearch(providerId: string, enabled: boolean): Promise<McpState>;
+  /** Turn next-message predictions on or off; the answer is the current state. */
+  setSuggestions(enabled: boolean): Promise<{ ok: boolean; suggestions: boolean }>;
   setSubagentsEnabled(enabled: boolean): Promise<McpState>;
   setAgentExposure(exposure: "prompt" | "lazy" | "hidden"): Promise<McpState>;
   openAgentsConfig(): Promise<void>;

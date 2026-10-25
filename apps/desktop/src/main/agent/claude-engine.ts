@@ -33,6 +33,8 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
 interface ClaudeOptions extends NativeOptions {
   historyStore?: ImportedHistoryStore
   binary: string
+  /** The user's setting for next-message predictions; the CLI produces them natively. */
+  suggestions?: () => boolean
 }
 export class ClaudeCodeEngine extends NativeEngine {
   readonly id = 'claude' as const
@@ -109,6 +111,10 @@ export class ClaudeCodeEngine extends NativeEngine {
           resume: this.sessionId,
           sessionStore: storage.sessionStore,
           model: this.sessionId ? undefined : this.snapshot.model?.id || undefined,
+          // Claude Code predicts the user's next message itself, off its own prompt cache. At most
+          // one per turn, delivered after `result` — `consume()` keeps iterating past `result`, so
+          // the `prompt_suggestion` message below arrives without any extra request.
+          promptSuggestions: this.options.suggestions?.() === true,
           includePartialMessages: true,
           stderr: (text) => {
             this.stderr = (this.stderr + text).slice(-4000)
@@ -467,6 +473,10 @@ export class ClaudeCodeEngine extends NativeEngine {
           ? m.errors?.join('\n') || m.result || m.subtype
           : undefined
       )
+    } else if (m.type === 'prompt_suggestion') {
+      // The CLI's own prediction of the user's next message; same event the universal path emits.
+      const text = typeof m.suggestion === 'string' ? m.suggestion.trim() : ''
+      if (text) this.options.onEvent({ type: 'suggestion', text })
     }
   }
 }

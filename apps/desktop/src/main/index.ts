@@ -20,6 +20,8 @@ import { idleBeforeSwitch } from './agent/switch-guard'
 import { listSessions, readSummary } from './sessions'
 import { SessionStore, toSummary, type SessionRecord } from './session-store'
 import { generateSessionTitle, promptTitle } from './session-title'
+import { generateSuggestion } from './suggest'
+import { suggestionContext } from './suggestion-text'
 import { TranscriptStore } from './transcript-store'
 import * as providers from './providers'
 import { chatGptUsage, invalidateChatGptUsage } from './chatgpt-usage'
@@ -131,6 +133,82 @@ function requestSessionTitle(file: string, prompt: string, model?: PiModel): voi
   }).catch(() => {
     // Keep the first-prompt title. A metadata failure must never stop the main task.
   })
+}
+
+// --- input suggestions ----------------------------------------------------------------------
+/**
+ * One cheap request after a turn settles: "what would this user send next?".
+ *
+ * Opt-in (`config.suggestions`), because it costs one extra (usually prompt-cached) request per
+ * turn. Claude Code does this natively (`promptSuggestions`), so the universal request is skipped
+ * there — the CLI's own `prompt_suggestion` arrives as the same event, off its prompt cache.
+ *
+ * The window shows it as ghost text in an empty composer (Tab inserts it) and as a chip above it;
+ * `text: null` means "forget the one you have".
+ */
+let suggestionTicket = 0
+let suggestionAbort: AbortController | undefined
+/** Session the pending suggestion belongs to, so a late answer cannot land in another one. */
+let suggestionKey: string | undefined
+let suggestionText: string | undefined
+/** Transcript length the last request was made for: one settle never asks twice. */
+let suggestionStamp = -1
+
+function suggestionsEnabled(): boolean {
+  return desktopConfig.suggestions === true
+}
+
+function sendSuggestion(text: string | null, key: string | undefined = suggestionKey): void {
+  mainWindow?.webContents.send('pi:event', { type: 'suggestion', text, sessionKey: key })
+}
+
+/** Drop what is pending: a new turn started, the session changed, or the setting was turned off. */
+function clearSuggestion(): void {
+  suggestionTicket += 1
+  suggestionAbort?.abort()
+  suggestionAbort = undefined
+  suggestionStamp = -1
+  const key = suggestionKey
+  suggestionKey = undefined
+  if (suggestionText === undefined) return
+  suggestionText = undefined
+  sendSuggestion(null, key)
+}
+
+async function suggestNext(engine: AgentEngine, model?: PiModel): Promise<void> {
+  // Claude Code has its own predictor; asking twice would pay twice for the same guess.
+  if (!suggestionsEnabled() || currentEngineId() === 'claude') return
+  // A side chat owns the composer, and an engine switch is about to replace the transcript.
+  if (btwActive || switchingEngine) return
+  const state = engine.state()
+  if (!state.sessionFile || state.isStreaming || state.compacting) return
+  let messages: Array<Record<string, unknown>>
+  try {
+    messages = (await engine.messages()) as Array<Record<string, unknown>>
+  } catch {
+    return
+  }
+  // A settle that added nothing (a compaction, a replayed session) has nothing to guess from.
+  if (messages.length === suggestionStamp) return
+  const turns = suggestionContext(messages)
+  if (turns.length < 2) return
+  clearSuggestion()
+  const ticket = suggestionTicket
+  const controller = new AbortController()
+  suggestionAbort = controller
+  suggestionKey = state.sessionFile
+  suggestionStamp = messages.length
+  try {
+    const text = await generateSuggestion(turns, model, controller.signal)
+    if (!text || ticket !== suggestionTicket || controller.signal.aborted) return
+    if (text === suggestionText) return
+    suggestionText = text
+    sendSuggestion(text)
+  } catch {
+    // A suggestion is a nicety: its failures are never worth a toast or a log line.
+  } finally {
+    if (suggestionAbort === controller) suggestionAbort = undefined
+  }
 }
 
 /** Finish earlier observations before committing an engine change to the same session. */
@@ -318,12 +396,17 @@ function createEngine(record?: SessionRecord): AgentEngine {
       }
       status = next
       if (currentEngine) broadcastStatus()
-      if (next.sessionFile && next.sessionFile !== previous.sessionFile) void rememberSession()
+      if (next.sessionFile && next.sessionFile !== previous.sessionFile) {
+        clearSuggestion()
+        void rememberSession()
+      }
       else if (next.sessionName && next.sessionName !== previous.sessionName) void rememberSession()
     },
     onEvent: (record: Record<string, unknown>) => {
       // A parked run keeps working; its transcript is on disk and comes back when the session does.
       if (!isActive()) return
+      // A new turn makes the last guess irrelevant (and pays for a fresh one when it settles).
+      if (record.type === 'agent_start') clearSuggestion()
       if (!conversationStarted && !btwActive && record.message && conversationHasStarted([record.message])) {
         conversationStarted = true
         broadcastStatus()
@@ -342,6 +425,8 @@ function createEngine(record?: SessionRecord): AgentEngine {
         return
       }
       void rememberSession()
+      // After the run has settled, not during it: the guess costs one short request.
+      void suggestNext(slot.engine, slot.status.model)
       if (!configPending || switchingEngine) return
       configPending = false
       void startPi(status.cwd, sessionArgs())
@@ -363,6 +448,8 @@ function createEngine(record?: SessionRecord): AgentEngine {
     engine = new ClaudeCodeEngine({
       ...shared,
       binary: claudeBinary(),
+      // Claude Code has its own next-message predictor; the app skips its own request for it.
+      suggestions: () => suggestionsEnabled(),
       historyStore: new ImportedHistoryStore(path.join(app.getPath('userData'), 'imports', 'claude'))
     })
   } else if (engineId === 'codex') {
@@ -678,6 +765,8 @@ interface DesktopConfig {
   codexSandbox?: 'read-only' | 'workspace-write'
   /** Codex's experimental `request_user_input` tool, so the model can ask instead of guessing. */
   codexRequestUserInput?: boolean
+  /** Predict the user's next message after a turn settles (default off; costs one small request). */
+  suggestions?: boolean
   /** Repositories the user worked in, most recent first (sidebar "切换仓库" menu). */
   recentRepos?: string[]
   /** Per-repository defaults applied to a new session in that repository. */
@@ -2094,11 +2183,22 @@ function registerIpc(): void {
     capabilities: currentEngine.capabilities(),
     codexSandbox: desktopConfig.codexSandbox,
     codexRequestUserInput: desktopConfig.codexRequestUserInput !== false,
+    suggestions: desktopConfig.suggestions === true,
     cwd: status.cwd,
     sessionDir: currentSessionDir(),
     sharedSessionDir: sharedSessionDir(),
     activeProject: desktopConfig.activeProject
   }))
+
+  handle('pi:set-suggestions', async (_event, enabled: boolean) => {
+    await saveConfig({ suggestions: enabled === true })
+    // Off means off at once, including a request that is already in flight.
+    clearSuggestion()
+    // Claude Code reads the flag when it connects, so an open session restarts to pick it up (the
+    // same rule as Codex's spawn-time options).
+    if (currentEngineId() === 'claude') await reloadPiConfig()
+    return { ok: true, suggestions: desktopConfig.suggestions === true }
+  })
 
   handle('updates:snapshot', () => updates.getSnapshot())
   handle('updates:check', () => updates.check())

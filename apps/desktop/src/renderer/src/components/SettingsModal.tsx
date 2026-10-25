@@ -1056,6 +1056,29 @@ export function SettingsModal({
                   <p className="field-hint">由当前引擎管理；可使用 /compact 手动压缩。</p>
                 )}
               </div>
+
+              <div className="field">
+                <label>输入建议</label>
+                <div className="field-row">
+                  <Toggle
+                    checked={desktopConfig?.suggestions === true}
+                    disabled={!desktopConfig}
+                    onChange={(enabled) => {
+                      void window.pi.setSuggestions(enabled).then(async (result) => {
+                        if (!result.ok) setError('设置失败')
+                        setDesktopConfig(await window.pi.getDesktopConfig())
+                      })
+                    }}
+                  />
+                  <span className="field-inline">
+                    {desktopConfig?.suggestions ? '回合结束后给出下一句' : '已关闭'}
+                  </span>
+                </div>
+                <p className="field-hint">
+                  每回合结束后猜你下一句会说什么，显示在输入框里：按 Tab 填入、Esc 忽略。
+                  会多一次很小的请求（只带最近几轮对话）；Claude Code 用它自带的预测，不额外请求。
+                </p>
+              </div>
               {desktopConfig?.capabilities?.toolPolicy === 'sandbox' && (
                 <div className="field">
                   <label>文件访问范围</label>

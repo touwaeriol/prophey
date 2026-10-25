@@ -114,6 +114,13 @@ export default function App(): React.JSX.Element {
   })
   /** Session the composer currently belongs to; a ref so async callbacks target the same one. */
   const composerKeyRef = useRef(LOCAL_COMPOSER_KEY)
+  /**
+   * The predicted next message, and the conversation it was predicted in.
+   *
+   * Owned here rather than in the composer map: it is not the user's text, it is replaced whenever a
+   * turn settles, and it must never follow a session switch (the key decides whether it renders).
+   */
+  const [suggestion, setSuggestion] = useState<{ text: string; key: string } | null>(null)
   const activeComposerKey = composerKey(status.sessionKey ?? status.sessionFile)
   useEffect(() => { composerKeyRef.current = activeComposerKey }, [activeComposerKey])
   const activeComposer = composerFor(composers, activeComposerKey)
@@ -543,9 +550,15 @@ export default function App(): React.JSX.Element {
       }
       const owner = statusRef.current
       if (owner.switchingEngine || !messagesBelong(record.sessionKey as string | undefined, owner)) return
+      const type = String(record.type ?? '')
+      // A prediction is not transcript: it must not invalidate a transcript snapshot being fetched.
+      if (type === 'suggestion') {
+        const text = typeof record.text === 'string' ? record.text.trim() : ''
+        setSuggestion(text ? { text, key: composerKey(record.sessionKey as string | undefined) } : null)
+        return
+      }
       // Invalidate snapshots begun before this event so a late fetch cannot erase new output.
       messagesRequest.current++
-      const type = String(record.type ?? '')
       const now = Date.now()
       setItems((prev) => applyConversationEvent(prev, record, now))
       switch (type) {
@@ -1118,6 +1131,8 @@ export default function App(): React.JSX.Element {
       if (statusRef.current.switchingEngine || owner !== composerKeyRef.current) return
       const text = draft.trim()
       if (!text && draftImages.length === 0) return
+      // The guess was for the message the user is about to send; it is spent either way.
+      setSuggestion(null)
       // Slash commands are local: they run here and never become a message, streaming or not.
       // Only an unknown `/xxx` falls through and goes to pi like any other prompt. This runs before
       // the `/btw` guard below so `/mcp` and `/btw` still work while a side chat is open.
@@ -1445,6 +1460,8 @@ export default function App(): React.JSX.Element {
               commands={engineCommands}
               value={draft}
               onChange={setDraft}
+              suggestion={suggestion && suggestion.key === activeComposerKey ? suggestion.text : undefined}
+              onSuggestionUsed={() => setSuggestion(null)}
               images={draftImages}
               onImagesChange={setDraftImages}
               queued={queued}

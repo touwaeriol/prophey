@@ -1678,6 +1678,83 @@ button:disabled {
   color: var(--text-faint);
 }
 
+/* Predicted next message: a chip above the box, ghost text inside an empty one. */
+.composer-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 2px 0 2px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-suggestion:hover {
+  background: var(--bg-hover);
+}
+
+.composer-suggestion .suggestion-label {
+  flex: none;
+  opacity: 0.7;
+}
+
+.composer-suggestion .suggestion-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.composer-suggestion:hover .suggestion-text {
+  color: var(--text);
+}
+
+.composer-suggestion kbd {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* The textarea and its ghost share one box, so the prediction starts exactly at the caret. */
+.composer-input {
+  position: relative;
+}
+
+/* Block, so the wrapper is exactly the textarea's box — an inline-block baseline gap would make the
+   ghost 3px taller than the text it mirrors. */
+.composer-input textarea {
+  display: block;
+}
+
+.composer-ghost {
+  position: absolute;
+  inset: 0;
+  padding: 2px 4px;
+  pointer-events: none;
+  color: var(--text-faint);
+  font: inherit;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+
+.composer-ghost-typed {
+  visibility: hidden;
+}
+
 .composer-foot {
   display: flex;
   align-items: center;

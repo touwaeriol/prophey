@@ -1,6 +1,7 @@
 import type { PiModel } from '../shared/types'
 import * as providers from './providers'
 import { guardedStream } from './agent/stream-guard'
+import { metadataModel } from './suggest'
 
 export function promptTitle(prompt: string): string {
   const text = prompt.replace(/\s+/g, ' ').trim()
@@ -17,16 +18,9 @@ export function cleanTitle(value: string): string {
 /** Metadata-only request: no tools, transcript, workspace instructions or main-turn events. */
 export async function generateSessionTitle(prompt: string, preferred?: PiModel): Promise<string> {
   if (!prompt.trim()) return '图片会话'
-  const choices = await providers.listModelChoices()
-  const settings = await providers.getAppSettings()
-  // CLI engines have their own provider ids; metadata uses an already configured desktop model.
-  const selected = choices.find(m => m.provider === preferred?.provider && m.id === preferred.id)
-    ?? choices.find(m => m.provider === settings.defaultProvider && m.id === settings.defaultModel)
-    ?? choices[0]
-  if (!selected) throw new Error('没有可用于生成标题的已配置模型')
+  const model = await metadataModel(preferred)
+  if (!model) throw new Error('没有可用于生成标题的已配置模型')
   const runtime = await providers.getRuntime()
-  const model = runtime.getModel(selected.provider, selected.id)
-  if (!model) throw new Error('标题模型不可用')
   let answer = ''
   let complete = false
   const stream = guardedStream<Record<string, unknown>>(signal => runtime.streamSimple(model, {

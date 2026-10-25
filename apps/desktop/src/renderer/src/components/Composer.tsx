@@ -80,7 +80,9 @@ export function Composer({
   onChooseWorkspace,
   statusBar,
   capabilities,
-  commands
+  commands,
+  suggestion,
+  onSuggestionUsed
 }: {
   value: string
   onChange: (value: string) => void
@@ -109,6 +111,13 @@ export function Composer({
    */
   capabilities?: EngineCapabilities
   commands: EngineCommand[]
+  /**
+   * Predicted next message for this conversation. Rendered as ghost text while the draft is empty
+   * (or a prefix of it, so Tab completes what was started) and as a chip above the box.
+   */
+  suggestion?: string
+  /** The suggestion was accepted or dismissed; the window forgets it until the next turn. */
+  onSuggestionUsed?: () => void
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const contextRef = useRef<HTMLDivElement>(null)
@@ -128,6 +137,21 @@ export function Composer({
   const [speedError, setSpeedError] = useState<string>()
   const [preview, setPreview] = useState<DraftImage>()
   const [dragging, setDragging] = useState(false)
+  /**
+   * A prediction is only shown while it could be what the user is already typing: an empty draft, or
+   * a strict prefix of the suggestion. Once the draft diverges it is wrong, so it disappears —
+   * silently replacing or appending somebody's half-written message would be worse than nothing.
+   */
+  const suggestionFits = Boolean(
+    suggestion &&
+      !disabled &&
+      !streaming &&
+      !status.compacting &&
+      !status.switchingEngine &&
+      (value === '' || (value.length < suggestion.length && suggestion.startsWith(value)))
+  )
+  /** The untyped part, drawn as ghost text after what is already in the box. */
+  const ghostText = suggestionFits ? suggestion!.slice(value.length) : undefined
   const [slashIndex, setSlashIndex] = useState(0)
   // Set when a command was inserted from the menu, so Enter sends instead of re-applying it.
   const [slashPicked, setSlashPicked] = useState<string | undefined>(undefined)
@@ -528,63 +552,107 @@ export function Composer({
           </div>
         )}
         <DraftImageStrip images={images} onRemove={removeImage} onPreview={setPreview} />
-        <textarea
-          ref={ref}
-          value={value}
-          rows={1}
-          spellCheck={false}
-          placeholder={
-            status.compacting
-              ? '正在压缩上下文，结束后会自动继续…'
-              : streaming
-                ? capabilities?.steer
-                  ? '继续输入，Enter 引导'
-                  : '继续输入，Enter 排队'
-                : '发送消息…（可直接粘贴图片）'
-          }
-          onChange={(event) => {
-            const next = event.target.value
-            if (next !== slashPicked) setSlashPicked(undefined)
-            onChange(next)
-            if (next.endsWith('@') && (next.length === 1 || /\s/.test(next[next.length - 2]))) {
-              void openContextPicker()
+        {suggestionFits && (
+          <button
+            type="button"
+            className="composer-suggestion"
+            // Keep the caret in the textarea: accepting is a keystroke, not a focus change.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              onChange(suggestion!)
+              ref.current?.focus()
+            }}
+            title="按 Tab 填入"
+          >
+            <span className="suggestion-label">下一句</span>
+            <span className="suggestion-text">{suggestion}</span>
+            <kbd>Tab</kbd>
+          </button>
+        )}
+        <div className="composer-input">
+          <textarea
+            ref={ref}
+            value={value}
+            rows={1}
+            spellCheck={false}
+            placeholder={
+              ghostText !== undefined
+                ? ''
+                : status.compacting
+                  ? '正在压缩上下文，结束后会自动继续…'
+                  : streaming
+                    ? capabilities?.steer
+                      ? '继续输入，Enter 引导'
+                      : '继续输入，Enter 排队'
+                    : '发送消息…（可直接粘贴图片）'
             }
-          }}
-          onKeyDown={(event) => {
-            if (slashMatches.length > 0) {
-              if (event.key === 'ArrowDown') {
-                event.preventDefault()
-                setSlashIndex((index) => (index + 1) % slashMatches.length)
-                return
+            onChange={(event) => {
+              const next = event.target.value
+              if (next !== slashPicked) setSlashPicked(undefined)
+              onChange(next)
+              if (next.endsWith('@') && (next.length === 1 || /\s/.test(next[next.length - 2]))) {
+                void openContextPicker()
               }
-              if (event.key === 'ArrowUp') {
-                event.preventDefault()
-                setSlashIndex((index) => (index - 1 + slashMatches.length) % slashMatches.length)
-                return
+            }}
+            onKeyDown={(event) => {
+              if (slashMatches.length > 0) {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  setSlashIndex((index) => (index + 1) % slashMatches.length)
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setSlashIndex((index) => (index - 1 + slashMatches.length) % slashMatches.length)
+                  return
+                }
+                if (event.key === 'Enter' || event.key === 'Tab') {
+                  event.preventDefault()
+                  const command = slashMatches[Math.min(slashIndex, slashMatches.length - 1)]
+                  applyCommand(command.name, command.args)
+                  return
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  onChange('')
+                  return
+                }
               }
-              if (event.key === 'Enter' || event.key === 'Tab') {
-                event.preventDefault()
-                const command = slashMatches[Math.min(slashIndex, slashMatches.length - 1)]
-                applyCommand(command.name, command.args)
-                return
+              // An IME owns Tab/Esc/Enter until the candidate is committed.
+              if (!event.nativeEvent.isComposing) {
+                if (event.key === 'Tab' && ghostText !== undefined && !event.shiftKey) {
+                  // Accept the prediction: fill the box, do not send. The remainder is exactly what
+                  // the ghost is showing, so the text never jumps.
+                  event.preventDefault()
+                  onChange(value + ghostText)
+                  onSuggestionUsed?.()
+                  return
+                }
+                if (event.key === 'Escape' && suggestionFits) {
+                  event.preventDefault()
+                  onSuggestionUsed?.()
+                  return
+                }
               }
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                onChange('')
-                return
-              }
-            }
-            if (event.key !== 'Enter') return
-            if (event.nativeEvent.isComposing) return
-            if (event.shiftKey) return
-            event.preventDefault()
-            // Running turn: Enter steers (the message joins the current run), Ctrl+Enter queues it
-            // for after the run. Idle, both just send.
-            if (event.ctrlKey || event.metaKey) onSend('send')
-            else if (streaming && !status.compacting && capabilities?.steer) onSend('steer')
-            else onSend('send')
-          }}
-        />
+              if (event.key !== 'Enter') return
+              if (event.nativeEvent.isComposing) return
+              if (event.shiftKey) return
+              event.preventDefault()
+              // Running turn: Enter steers (the message joins the current run), Ctrl+Enter queues it
+              // for after the run. Idle, both just send.
+              if (event.ctrlKey || event.metaKey) onSend('send')
+              else if (streaming && !status.compacting && capabilities?.steer) onSend('steer')
+              else onSend('send')
+            }}
+          />
+          {ghostText !== undefined && (
+            <div className="composer-ghost" aria-hidden>
+              {/* The typed part is invisible but occupies its width, so the ghost starts at the caret. */}
+              <span className="composer-ghost-typed">{value}</span>
+              <span className="composer-ghost-rest">{ghostText}</span>
+            </div>
+          )}
+        </div>
         <div className="composer-foot">
           <div className="composer-left" ref={contextRef}>
             <button

@@ -133,6 +133,8 @@ const bridge: PiBridge = {
     ipcRenderer.invoke('mcp:set-web-mode', mode) as Promise<McpState>,
   setProviderWebSearch: (providerId: string, enabled: boolean) =>
     ipcRenderer.invoke('mcp:set-provider-web-search', providerId, enabled) as Promise<McpState>,
+  setSuggestions: (enabled: boolean) =>
+    ipcRenderer.invoke('pi:set-suggestions', enabled) as Promise<{ ok: boolean; suggestions: boolean }>,
   setSubagentsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke('mcp:set-subagents', enabled) as Promise<McpState>,
   setAgentExposure: (exposure: 'prompt' | 'lazy' | 'hidden') =>
