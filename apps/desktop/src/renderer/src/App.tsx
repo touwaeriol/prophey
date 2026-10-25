@@ -25,6 +25,7 @@ import { buildOutline } from './lib/outline'
 import { AskQuestionPanel } from './components/AskQuestionPanel'
 import { ConfirmDialog, type ConfirmRequest } from './components/ConfirmDialog'
 import { SubagentsDrawer } from './components/SubagentsDrawer'
+import { TaskDrawer, type TaskTarget } from './components/TaskDrawer'
 import { RunStatusBar } from './components/RunStatusBar'
 import { SessionPanel } from './components/SessionPanel'
 import { Markdown } from './components/Markdown'
@@ -223,6 +224,8 @@ export default function App(): React.JSX.Element {
   const [btwDraft, setBtwDraft] = useState('')
   const [mcpOpen, setMcpOpen] = useState(false)
   const [subagentsOpen, setSubagentsOpen] = useState(false)
+  /** The background command whose output is open in the side drawer. */
+  const [taskTarget, setTaskTarget] = useState<TaskTarget | undefined>(undefined)
   const [subagentFocus, setSubagentFocus] = useState<string | undefined>(undefined)
   const [allSubagents, setSubagents] = useState<SubagentView[]>([])
   const subagents = allSubagents.filter(record => record.parentSession && messagesBelong(record.parentSession, status))
@@ -1561,6 +1564,7 @@ export default function App(): React.JSX.Element {
               key={activeComposerKey}
               subagents={subagents}
               onOpenSubagent={openSubagents}
+              onOpenTask={(task) => setTaskTarget({ ...task, sessionKey: composerKey(status.sessionKey ?? status.sessionFile) })}
               status={status}
               contextUsage={contextUsage}
               additional={activeAdditional}
@@ -1572,6 +1576,14 @@ export default function App(): React.JSX.Element {
                 setSettingsOpen(true)
               }}
               onNotice={setToast}
+            />
+          )}
+
+          {taskTarget && (
+            <TaskDrawer
+              key={taskTarget.id}
+              task={taskTarget}
+              onClose={() => setTaskTarget(undefined)}
             />
           )}
 

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { engineLabel } from '@shared/engine'
 import type {
   ContextUsage,
@@ -9,6 +9,7 @@ import type {
   SubagentView
 } from '@shared/types'
 import { isSubagentRunning } from '../lib/subagents'
+import type { TaskTarget } from './TaskDrawer'
 import { composerKey } from '../lib/session-composer'
 import type { ChatItem } from '../lib/messages'
 import { sessionOutputs } from '../lib/session-outputs'
@@ -144,6 +145,7 @@ export function SessionPanel({
   items,
   subagents,
   onOpenSubagent,
+  onOpenTask,
   onClose,
   onOpenSettings,
   onNotice
@@ -155,6 +157,8 @@ export function SessionPanel({
   items: ChatItem[]
   subagents: SubagentView[]
   onOpenSubagent: (id: string) => void
+  /** Second level of the background-task card: the drawer reads the command's output. */
+  onOpenTask: (task: TaskTarget) => void
   onClose: () => void
   onOpenSettings: (tab: 'providers' | 'mcp' | 'general') => void
   onNotice: (text: string | null) => void
@@ -163,25 +167,11 @@ export function SessionPanel({
   const [showAllOutputs, setShowAllOutputs] = useState(false)
   const [showMcpTools, setShowMcpTools] = useState(false)
   const [busy, setBusy] = useState<string | undefined>(undefined)
-  const [selectedTask, setSelectedTask] = useState<string>()
-  const [taskOutput, setTaskOutput] = useState('')
   const [showFinished, setShowFinished] = useState(false)
   const owner = composerKey(status.sessionKey ?? status.sessionFile)
   useEffect(() => {
     localStorage.setItem(EXPANDED_KEY, JSON.stringify(expanded))
   }, [expanded])
-  useEffect(() => {
-    if (!selectedTask) return
-    let cancelled = false
-    const read = async (): Promise<void> => {
-      const result = await window.pi.readBackgroundTask(selectedTask, owner).catch(error => ({ ok: false, error: String(error), text: undefined }))
-      if (!cancelled) setTaskOutput(result.ok ? result.text ?? '' : result.error ?? '读取失败')
-    }
-    setTaskOutput('正在读取…')
-    void read()
-    const timer = setInterval(() => void read(), 2000)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [selectedTask, owner])
   /** Ticks while a background command runs so its elapsed time stays honest. */
   const [, setTick] = useState(0)
 
@@ -193,21 +183,6 @@ export function SessionPanel({
   }, [backgroundTasks.length])
 
   const isOpen = (key: string): boolean => expanded[key] === true
-  /**
-   * Second level of the background-task card: opening a row shows that task's output right below it,
-   * instead of one shared block at the bottom of the card that belonged to whichever row was last
-   * clicked.
-   */
-  const taskDetail = (id: string): React.JSX.Element | null =>
-    selectedTask === id ? (
-      <div className="panel-task-detail">
-        <div className="panel-card-actions">
-          <span>命令输出 · 最近 12KB</span>
-          <button className="panel-link" onClick={() => setSelectedTask(undefined)}>关闭</button>
-        </div>
-        <pre>{taskOutput}</pre>
-      </div>
-    ) : null
   const toggle = (key: string): void =>
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
 
@@ -523,29 +498,25 @@ export function SessionPanel({
           }
         >
           {backgroundTasks.map((task) => (
-            <Fragment key={task.id}>
-              <div className="panel-row" title={task.command}>
-                <span className="panel-dot running" aria-hidden="true" />
-                <button
-                  className="panel-link panel-row-main panel-row-ellipsis"
-                  title={selectedTask === task.id ? '收起命令输出' : '查看命令输出'}
-                  aria-expanded={selectedTask === task.id}
-                  onClick={() => setSelectedTask(selectedTask === task.id ? undefined : task.id)}
-                >
-                  {task.command}
-                </button>
-                <span className="panel-row-state">{formatElapsed(Date.now() - task.startedAt)}</span>
-                <button
-                  className="panel-icon-btn"
-                  title="停止这个后台命令"
-                  disabled={busy === task.id}
-                  onClick={() => void stopTask(task.id)}
-                >
-                  <StopIcon size={11} />
-                </button>
-              </div>
-              {taskDetail(task.id)}
-            </Fragment>
+            <div className="panel-row" key={task.id} title={task.command}>
+              <span className="panel-dot running" aria-hidden="true" />
+              <button
+                className="panel-link panel-row-main panel-row-ellipsis"
+                title="在侧栏查看命令输出"
+                onClick={() => onOpenTask({ id: task.id, command: task.command, startedAt: task.startedAt })}
+              >
+                {task.command}
+              </button>
+              <span className="panel-row-state">{formatElapsed(Date.now() - task.startedAt)}</span>
+              <button
+                className="panel-icon-btn"
+                title="停止这个后台命令"
+                disabled={busy === task.id}
+                onClick={() => void stopTask(task.id)}
+              >
+                <StopIcon size={11} />
+              </button>
+            </div>
           ))}
           {subagents.filter(isSubagentRunning).map(record => (
             <button className="panel-row panel-row-button" key={record.id} onClick={() => onOpenSubagent(record.id)} title="查看子代理详情">
@@ -561,19 +532,16 @@ export function SessionPanel({
             </button>
           )}
           {showFinished && (status.backgroundHistory ?? []).map(task => (
-            <Fragment key={task.id}>
-              <button
-                className="panel-row panel-row-button"
-                aria-expanded={selectedTask === task.id}
-                onClick={() => setSelectedTask(selectedTask === task.id ? undefined : task.id)}
-              >
-                <span className="panel-row-main panel-row-ellipsis">{task.command}</span>
-                <span className="panel-row-state">
-                  {task.state === 'completed' ? '完成' : task.state === 'failed' ? '失败' : '停止'}
-                </span>
-              </button>
-              {taskDetail(task.id)}
-            </Fragment>
+            <button
+              key={task.id}
+              className="panel-row panel-row-button"
+              onClick={() => onOpenTask(task)}
+            >
+              <span className="panel-row-main panel-row-ellipsis">{task.command}</span>
+              <span className="panel-row-state">
+                {task.state === 'completed' ? '完成' : task.state === 'failed' ? '失败' : '停止'}
+              </span>
+            </button>
           ))}
           {showFinished && subagents.filter(record => !isSubagentRunning(record)).map(record => (
             <button key={record.id} className="panel-row panel-row-button" onClick={() => onOpenSubagent(record.id)}>
