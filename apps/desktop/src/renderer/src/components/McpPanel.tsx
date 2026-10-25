@@ -10,6 +10,12 @@ import type {
 import type { EngineId } from "@shared/engine";
 import { engineLabel } from "@shared/engine";
 import {
+  checkWarpgrepEndpoint,
+  WARP_DEFAULT_MODEL,
+  WARP_ENDPOINT_EXAMPLE,
+  WARP_MORPH_MODEL,
+} from "@shared/warpgrep-endpoint";
+import {
   mcpAvailability,
   mcpUsageLabel,
   type McpGroupId,
@@ -270,9 +276,15 @@ function EngineCard({
   onToggleTool: (server: string, tool: string, enabled: boolean) => void;
 }): React.JSX.Element {
   const [keyDraft, setKeyDraft] = useState("");
-  const [endpointDraft, setEndpointDraft] = useState("");
-  const [modelDraft, setModelDraft] = useState("");
+  const [endpointDraft, setEndpointDraft] = useState(warpgrep?.baseUrl ?? "");
+  const [modelDraft, setModelDraft] = useState(warpgrep?.model ?? "");
   const [braveDraft, setBraveDraft] = useState("");
+  // The saved backend arrives after the first paint (and changes after every save), so the fields
+  // follow it: they show what is in use and are edited in place, never "type it again to replace".
+  useEffect(() => {
+    setEndpointDraft(warpgrep?.baseUrl ?? "");
+    setModelDraft(warpgrep?.model ?? "");
+  }, [warpgrep?.baseUrl, warpgrep?.model]);
   const indexLabel: Record<string, string> = {
     indexed: "已索引",
     missing: "未建立索引",
@@ -284,6 +296,18 @@ function EngineCard({
   const isWarpGrep = engine.id === "warpgrep";
   const isWeb = engine.id === "web";
   const webHint = web?.braveKeyHint;
+  const endpointCheck = checkWarpgrepEndpoint(endpointDraft);
+  const endpointDirty =
+    (endpointCheck.baseUrl ?? "") !== (warpgrep?.baseUrl ?? "") ||
+    modelDraft.trim() !== (warpgrep?.model ?? "");
+  const activeKey = warpgrep?.activeKey;
+  const keySourceLabel = !activeKey
+    ? undefined
+    : activeKey.source === "provider"
+      ? `复用「${activeKey.provider ?? "服务商"}」已登录的 Key`
+      : activeKey.source === "own"
+        ? "此端点单独保存的 Key"
+        : "Morph 的 Key";
   const description = isWeb
     ? "搜索网页与读取网页内容"
     : isWarpGrep
@@ -328,8 +352,10 @@ function EngineCard({
           )}
           {isWarpGrep && (
             <p className="field-hint">
-              搜索过程中读取的代码片段会发送到{" "}
-              {warpgrep?.baseUrl ? `自定义端点（${warpgrep.baseUrl}）` : "Morph API"}。
+              搜索时读取的代码片段会发到下面的后端。自定义端点要填 OpenAI 兼容的 chat
+              completions 基础地址（如 <code>{WARP_ENDPOINT_EXAMPLE}</code>），结尾不要带{" "}
+              <code>/chat/completions</code>，也不能用 Anthropic 的 <code>/anthropic</code>。
+              留空则用 Morph 托管模型。
             </p>
           )}
           {isWeb && web && (
@@ -437,30 +463,24 @@ function EngineCard({
               <div className="mcp-key-row mcp-endpoint-row">
                 <input
                   value={endpointDraft}
-                  placeholder={
-                    warpgrep?.baseUrl
-                      ? `当前 ${warpgrep.baseUrl}，输入新地址覆盖`
-                      : "自定义端点，如 https://api.deepseek.com/v1（留空用 Morph）"
-                  }
+                  placeholder={`OpenAI 兼容地址，如 ${WARP_ENDPOINT_EXAMPLE}`}
                   onChange={(event) => setEndpointDraft(event.target.value)}
                   spellCheck={false}
                 />
                 <input
                   value={modelDraft}
-                  placeholder={warpgrep?.model ?? "模型，如 deepseek-flash"}
+                  placeholder={`模型，默认 ${WARP_DEFAULT_MODEL}`}
                   onChange={(event) => setModelDraft(event.target.value)}
                   spellCheck={false}
                 />
                 <button
                   className="ghost"
-                  disabled={busy}
+                  disabled={busy || !!endpointCheck.error || !endpointDirty}
                   onClick={() => {
                     onSaveWarpgrep({
-                      baseUrl: endpointDraft.trim() || warpgrep?.baseUrl || null,
-                      model: modelDraft.trim() || warpgrep?.model || null,
+                      baseUrl: endpointCheck.baseUrl ?? null,
+                      model: modelDraft.trim() || null,
                     });
-                    setEndpointDraft("");
-                    setModelDraft("");
                   }}
                 >
                   保存端点
@@ -469,28 +489,29 @@ function EngineCard({
                   <button
                     className="ghost"
                     disabled={busy}
-                    onClick={() => {
-                      setEndpointDraft("");
-                      setModelDraft("");
-                      onSaveWarpgrep({ baseUrl: null, model: null });
-                    }}
+                    onClick={() => onSaveWarpgrep({ baseUrl: null, model: null })}
                   >
                     用回 Morph
                   </button>
                 )}
               </div>
+              {(endpointCheck.error || endpointCheck.normalized) && (
+                <p
+                  className={`field-hint${endpointCheck.error ? " mcp-field-error" : ""}`}
+                >
+                  {endpointCheck.error ?? `保存时记为 ${endpointCheck.baseUrl}`}
+                </p>
+              )}
               <div className="mcp-key-row">
                 <input
                   type="password"
                   value={keyDraft}
                   placeholder={
-                    warpgrep?.keyHint
-                      ? `已保存 ${warpgrep.keyHint}，输入新 Key 覆盖`
-                      : warpgrep?.baseUrl && warpgrep.keySource === "provider"
-                        ? "留空则复用服务商里已登录的 Key"
-                        : morphKeyHint
-                          ? `已保存 ${morphKeyHint}，输入新 Key 覆盖`
-                          : "sk-..."
+                    activeKey
+                      ? `输入新 Key 覆盖当前 ${activeKey.hint}`
+                      : warpgrep?.baseUrl
+                        ? "sk-...（这个端点还没有 Key）"
+                        : "sk-w_...（Morph API Key）"
                   }
                   onChange={(event) => setKeyDraft(event.target.value)}
                   spellCheck={false}
@@ -519,6 +540,16 @@ function EngineCard({
                   </button>
                 )}
               </div>
+              <p className="field-hint mcp-warpgrep-summary">
+                当前：{warpgrep?.baseUrl ?? "Morph 托管模型"}
+                {" · "}
+                {warpgrep?.baseUrl
+                  ? warpgrep.model ?? WARP_DEFAULT_MODEL
+                  : WARP_MORPH_MODEL}
+                {" · "}
+                {keySourceLabel ?? "还没有可用的 Key"}
+                {activeKey ? `（${activeKey.hint}）` : ""}
+              </p>
             </>
           ) : (
             <div className="mcp-engine-actions">

@@ -148,3 +148,68 @@ test('warpgrep: a custom endpoint that refuses the call surfaces as a typed erro
     (error) => error instanceof WarpGrepError && error.code === 'UNAUTHORIZED'
   )
 })
+
+/**
+ * The endpoint field is the place a wrong value must be caught: the search appends
+ * `/chat/completions` itself, so an Anthropic base URL only fails later, as a 404 inside a search.
+ */
+const endpoints = (() => {
+  const bundle = path.join(temp, 'warpgrep-endpoint.cjs')
+  esbuild.buildSync({
+    entryPoints: [path.join(root, 'apps/desktop/src/shared/warpgrep-endpoint.ts')],
+    outfile: bundle,
+    bundle: true,
+    platform: 'node',
+    format: 'cjs'
+  })
+  return require(bundle)
+})()
+
+test('warpgrep endpoint: a chat completions base URL is accepted as typed', () => {
+  for (const value of ['https://api.deepseek.com/v1', 'https://api.deepseek.com', 'http://127.0.0.1:8000/v1']) {
+    const check = endpoints.checkWarpgrepEndpoint(value)
+    assert.equal(check.error, undefined)
+    assert.equal(check.baseUrl, value)
+    assert.equal(check.normalized, false)
+  }
+})
+
+test('warpgrep endpoint: empty means the hosted Morph model', () => {
+  for (const value of ['', '   ', null, undefined]) {
+    assert.deepEqual(endpoints.checkWarpgrepEndpoint(value), {})
+  }
+})
+
+test('warpgrep endpoint: an Anthropic-protocol address is refused, not silently sent', () => {
+  for (const value of [
+    'https://api.deepseek.com/anthropic',
+    'https://api.deepseek.com/anthropic/',
+    'https://api.anthropic.com/v1/messages'
+  ]) {
+    const check = endpoints.checkWarpgrepEndpoint(value)
+    assert.match(check.error, /Anthropic/)
+    assert.match(check.error, /chat completions/)
+    assert.equal(check.baseUrl, undefined)
+  }
+})
+
+test('warpgrep endpoint: a pasted completion URL is trimmed to its base', () => {
+  assert.deepEqual(endpoints.checkWarpgrepEndpoint('https://api.deepseek.com/chat/completions'), {
+    baseUrl: 'https://api.deepseek.com',
+    normalized: true
+  })
+  assert.deepEqual(endpoints.checkWarpgrepEndpoint('https://api.openai.com/v1/chat/completions/'), {
+    baseUrl: 'https://api.openai.com/v1',
+    normalized: true
+  })
+  assert.deepEqual(endpoints.checkWarpgrepEndpoint('https://api.deepseek.com/v1/'), {
+    baseUrl: 'https://api.deepseek.com/v1',
+    normalized: true
+  })
+})
+
+test('warpgrep endpoint: other protocols and schemes are named as the problem', () => {
+  assert.match(endpoints.checkWarpgrepEndpoint('not a url').error, /合法 URL/)
+  assert.match(endpoints.checkWarpgrepEndpoint('ftp://api.deepseek.com').error, /http\(s\)/)
+  assert.match(endpoints.checkWarpgrepEndpoint('https://api.openai.com/v1/responses').error, /Responses/)
+})

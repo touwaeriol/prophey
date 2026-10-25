@@ -561,10 +561,20 @@ export interface McpState {
   warpgrep: {
     baseUrl?: string;
     model?: string;
-    /** Masked key of the custom endpoint, when one was entered. */
+    /** Masked key saved on this endpoint itself, when one was entered. */
     keyHint?: string;
     /** `own` = endpoint key entered, `provider` = reuse the logged-in provider, `morph`/`none`. */
     keySource: 'own' | 'provider' | 'morph' | 'none';
+    /**
+     * The credential a search would send right now, masked, and where it comes from. Absent when
+     * there is none, which is the only case that needs the user to paste a key.
+     */
+    activeKey?: {
+      source: 'own' | 'provider' | 'morph';
+      /** Provider id for `source: 'provider'` (the logged-in account being reused). */
+      provider?: string;
+      hint: string;
+    };
   };
   servers: McpServerInfo[];
   userConfigPath: string;

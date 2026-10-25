@@ -15,12 +15,13 @@
  *   general model needs the system prompt, the `finish` fallback and path verification.
  */
 import { SearchError, searchCodebase } from '../../../../packages/warpgrep-mcp/search.mjs'
+import { WARP_DEFAULT_MODEL, WARP_MORPH_MODEL } from '../shared/warpgrep-endpoint'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
-const MODEL = 'morph-warp-grep-v2.1'
+const MODEL = WARP_MORPH_MODEL
 /** Used when a custom endpoint is configured without a model. */
-export const CUSTOM_DEFAULT_MODEL = 'deepseek-flash'
+export const CUSTOM_DEFAULT_MODEL = WARP_DEFAULT_MODEL
 const API_BASE = process.env.AGENT_DESKTOP_MORPH_BASE ?? 'https://api.morphllm.com/v1'
 const MAX_TURNS = 6
 /** Custom endpoints get a tighter whole-search budget than Morph: they are slower per turn. */

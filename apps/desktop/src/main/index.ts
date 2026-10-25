@@ -4,6 +4,7 @@ import { writeJsonAtomic } from './storage'
 import { listEngineCommands, executeEngineCommand } from './engine-commands'
 import { conversationHasStarted } from '../shared/session-policy'
 import { recentDirectories } from '../shared/recent-directories'
+import { checkWarpgrepEndpoint } from '../shared/warpgrep-endpoint'
 import { compactionRatio, compactionPercent, reserveFor, ratioFromPercent, ratioFromTokens } from './compaction-policy'
 import { isNativeSessionReference, type EngineId } from '../shared/engine'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
@@ -1420,19 +1421,7 @@ async function buildMcpState(): Promise<McpState> {
       configPath: agents.agentsFilePath(app.getPath('userData'))
     },
     morphKeyHint: maskKey(desktopConfig.mcp?.morphApiKey),
-    warpgrep: {
-      baseUrl: desktopConfig.mcp?.warpgrep?.baseUrl,
-      model: desktopConfig.mcp?.warpgrep?.model,
-      keyHint: maskKey(desktopConfig.mcp?.warpgrep?.apiKey),
-      /** Where the key comes from when `keyHint` is empty: the provider already logged in. */
-      keySource: desktopConfig.mcp?.warpgrep?.apiKey
-        ? 'own'
-        : desktopConfig.mcp?.warpgrep?.baseUrl
-          ? 'provider'
-          : desktopConfig.mcp?.morphApiKey
-            ? 'morph'
-            : 'none'
-    },
+    warpgrep: await warpgrepState(),
     servers,
     userConfigPath: profile.mcpPath(),
     projectConfigPath: mcp.projectMcpPath(status.cwd),
@@ -2473,19 +2462,12 @@ function registerIpc(): void {
     async (_event, patch: { baseUrl?: string | null; model?: string | null; apiKey?: string | null }) => {
       const current = { ...(desktopConfig.mcp?.warpgrep ?? {}) }
       if ('baseUrl' in patch) {
-        const baseUrl = patch.baseUrl?.trim()
-        if (baseUrl) {
-          let parsed: URL | undefined
-          try {
-            parsed = new URL(baseUrl)
-          } catch {
-            throw new Error('端点地址不是合法 URL')
-          }
-          if (!/^https?:$/.test(parsed.protocol)) throw new Error('端点必须是 http(s) 地址')
-          current.baseUrl = baseUrl.replace(/\/+$/, '')
-        } else {
-          delete current.baseUrl
-        }
+        // The value is an OpenAI-compatible chat base URL (`…/v1`); refuse Anthropic-protocol
+        // addresses here instead of letting a search fail on a 404 two steps later.
+        const endpoint = checkWarpgrepEndpoint(patch.baseUrl)
+        if (endpoint.error) throw new Error(endpoint.error)
+        if (endpoint.baseUrl) current.baseUrl = endpoint.baseUrl
+        else delete current.baseUrl
       }
       if ('model' in patch) {
         const model = patch.model?.trim()
@@ -3054,6 +3036,38 @@ function registerIpc(): void {
 }
 
 /**
+ * Where a WarpGrep search's key comes from, so the settings pane can say it out loud instead of
+ * asking the user to paste a key they already stored.
+ */
+export interface WarpGrepCredential {
+  apiKey?: string
+  source: 'own' | 'provider' | 'morph' | 'none'
+  /** Provider id whose logged-in credential is reused (`source: 'provider'`). */
+  provider?: string
+}
+
+/** The own key, else the provider the endpoint belongs to, else Morph's. */
+async function warpgrepCredential(baseUrl?: string): Promise<WarpGrepCredential> {
+  const configured = desktopConfig.mcp?.warpgrep ?? {}
+  const own = configured.apiKey?.trim()
+  if (own) return { apiKey: own, source: 'own' }
+  if (baseUrl) {
+    const provider = /deepseek/i.test(baseUrl)
+      ? 'deepseek'
+      : /openai/i.test(baseUrl)
+        ? 'openai'
+        : undefined
+    if (provider) {
+      const key = await providers.providerApiKey(provider)
+      if (key) return { apiKey: key, source: 'provider', provider }
+    }
+  }
+  const morph = desktopConfig.mcp?.morphApiKey?.trim()
+  if (morph) return { apiKey: morph, source: 'morph' }
+  return { source: 'none' }
+}
+
+/**
  * The WarpGrep backend actually used: a custom OpenAI-compatible endpoint when one is configured,
  * else the hosted Morph model. The key falls back to the provider credential the user already
  * stored (DeepSeek / OpenAI), so a custom URL never asks for the same key twice.
@@ -3062,17 +3076,33 @@ async function warpgrepBackend(): Promise<{ baseUrl?: string; model?: string; ap
   const configured = desktopConfig.mcp?.warpgrep ?? {}
   const baseUrl = configured.baseUrl?.trim() || undefined
   const model = configured.model?.trim() || undefined
-  let apiKey = configured.apiKey?.trim() || undefined
-  if (!apiKey && baseUrl) {
-    const provider = /deepseek/i.test(baseUrl)
-      ? "deepseek"
-      : /openai/i.test(baseUrl)
-        ? "openai"
-        : undefined
-    if (provider) apiKey = await providers.providerApiKey(provider)
-  }
-  apiKey = apiKey || desktopConfig.mcp?.morphApiKey?.trim() || undefined
+  const { apiKey } = await warpgrepCredential(baseUrl)
   return { baseUrl, model, apiKey }
+}
+
+/**
+ * The WarpGrep card's view of the backend: what is configured, plus the credential a search would
+ * use right now and where it came from — the pane shows that instead of asking for a key again.
+ */
+async function warpgrepState(): Promise<McpState['warpgrep']> {
+  const configured = desktopConfig.mcp?.warpgrep ?? {}
+  const baseUrl = configured.baseUrl?.trim() || undefined
+  const credential = await warpgrepCredential(baseUrl)
+  const hint = credential.apiKey ? maskKey(credential.apiKey) : undefined
+  return {
+    baseUrl,
+    model: configured.model?.trim() || undefined,
+    /** The key saved on the endpoint itself; empty means the fallbacks below are in play. */
+    keyHint: maskKey(configured.apiKey),
+    keySource: credential.source,
+    activeKey: hint
+      ? {
+          source: credential.source === 'none' ? 'morph' : credential.source,
+          hint,
+          ...(credential.provider ? { provider: credential.provider } : {})
+        }
+      : undefined
+  }
 }
 
 function createWindow(): void {

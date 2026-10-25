@@ -124,6 +124,7 @@ app.on('browser-window-created', (_event, window) => {
       await require('./queue-smoke.cjs')(evaluate, until, window)
       await require('./session-panel-smoke.cjs')(evaluate, until, window)
       await require('./session-title-smoke.cjs')(evaluate, until)
+      await require('./warpgrep-card-smoke.cjs')(evaluate, until)
       const version = (await evaluate('window.pi.getUpdateSnapshot()')).currentVersion
       assert.equal(version, require(path.join(desktop, 'package.json')).version)
       console.log('Electron smoke passed: isolated startup, IPC, compaction, command menus, settings, dismissal, pi/Prophey switching, version ' + version)
