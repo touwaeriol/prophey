@@ -54,7 +54,7 @@ module.exports = async function sessionIsolationSmoke(evaluate, until, window, f
     assert.equal(rejected.ok, false)
     assert.match(rejected.error, /原会话不存在/)
     // Capture the real UI with its own worker visible for layout review.
-    await evaluate(`(() => { if (!document.querySelector('.session-panel')) document.querySelector('.tabbar .icon-btn[title^="显示/隐藏会话概览"]').click() })()`)
+    await evaluate(`(() => { if (!document.querySelector('.session-panel')) document.querySelector('.tabbar .panel-toggle').click() })()`)
     await until(() => evaluate(`!!document.querySelector('.session-panel')`), 'panel')
     await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`)
     const dir = path.join(process.env.PROPHEY_SMOKE_ROOT, 'artifacts/session-isolation')

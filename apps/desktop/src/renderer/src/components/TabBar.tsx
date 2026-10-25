@@ -67,15 +67,21 @@ export function TabBar({
           <span>{subagentsRunning > 0 ? subagentsRunning : subagentsFinished || ''}</span>
         </button>
         <button
-          className={`icon-btn ${panelOpen ? 'on' : ''}`}
-          title="显示/隐藏会话概览（环境、上下文、连接器、产出、后台任务）"
+          className={`icon-btn panel-toggle ${panelOpen ? 'on' : ''}`}
+          title={
+            panelOpen
+              ? '隐藏会话概览（环境、上下文、连接器、产出、后台任务）'
+              : '显示会话概览（环境、上下文、连接器、产出、后台任务）'
+          }
+          aria-pressed={panelOpen}
           onClick={onTogglePanel}
         >
           <ListIcon size={15} />
         </button>
         <button
-          className={`icon-btn ${sidebarOpen ? 'on' : ''}`}
-          title="显示/隐藏侧栏"
+          className={`icon-btn sidebar-toggle ${sidebarOpen ? 'on' : ''}`}
+          title={sidebarOpen ? '隐藏侧栏' : '显示侧栏'}
+          aria-pressed={sidebarOpen}
           onClick={onToggleSidebar}
         >
           <PanelIcon size={15} />

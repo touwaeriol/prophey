@@ -125,6 +125,8 @@ const bridge: PiBridge = {
     ipcRenderer.invoke('mcp:set-tool', server, tool, enabled) as Promise<McpState>,
   setMorphApiKey: (key: string | null) =>
     ipcRenderer.invoke('mcp:set-morph-key', key) as Promise<McpState>,
+  setWarpgrepBackend: (patch: { baseUrl?: string | null; model?: string | null; apiKey?: string | null }) =>
+    ipcRenderer.invoke('mcp:set-warpgrep', patch) as Promise<McpState>,
   setBraveApiKey: (key: string | null) =>
     ipcRenderer.invoke('mcp:set-brave-key', key) as Promise<McpState>,
   setWebSearchMode: (mode: 'auto' | 'brave' | 'native') =>

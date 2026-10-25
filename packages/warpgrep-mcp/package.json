@@ -1,0 +1,22 @@
+{
+  "name": "@prophey/warpgrep-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WarpGrep-style natural-language code search as an MCP server, driven by DeepSeek (or any OpenAI-compatible chat model)",
+  "type": "module",
+  "bin": {
+    "warpgrep-mcp": "./server.mjs"
+  },
+  "files": [
+    "README.md",
+    "server.mjs",
+    "search.mjs",
+    "workspace.mjs",
+    "config.mjs",
+    "prompt.mjs",
+    "tools"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

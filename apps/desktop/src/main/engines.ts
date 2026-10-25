@@ -13,6 +13,7 @@ import { existsSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { McpEngineId, McpEngineState, McpToolInfo } from '../shared/types'
+import type { WarpGrepBackend } from './warpgrep'
 
 /** Tools declared to the model directly; every other tool of the server is loaded via tool_search. */
 export const DIRECT_TOOLS: Record<McpEngineId, string[]> = {
@@ -229,8 +230,8 @@ export interface EngineTargetSpec {
   /** Upstream tool names to expose; everything else is dropped. */
   allowlist: string[]
   timeoutMs: number
-  /** WarpGrep only. */
-  apiKey?: string
+  /** WarpGrep only: key, plus an optional custom OpenAI-compatible endpoint. */
+  warpgrep?: WarpGrepBackend
 }
 
 /** What the extension registers with pi: one HTTP endpoint per engine. */
@@ -286,7 +287,10 @@ function rootKey(id: McpEngineId, root: EngineRoot): string {
 export async function buildEngineTargets(options: {
   roots: EngineRoot[]
   config: Record<string, { enabled?: boolean; entry?: string } | undefined>
+  /** Legacy field: the Morph key alone, still honoured when `warpgrep.apiKey` is absent. */
   morphApiKey?: string
+  /** WarpGrep: Morph key, or a custom OpenAI-compatible endpoint. */
+  warpgrep?: WarpGrepBackend
   /** Web engine: whether any backend (Brave key or native provider) is configured. */
   webAvailable?: boolean
 }): Promise<EngineTargetSpec[]> {
@@ -320,7 +324,11 @@ export async function buildEngineTargets(options: {
           cwd: root.path,
           allowlist: ALLOWED_TOOLS[id],
           timeoutMs: TIMEOUT_MS[id],
-          apiKey: options.morphApiKey?.trim() || undefined
+          warpgrep: {
+            apiKey: options.warpgrep?.apiKey?.trim() || options.morphApiKey?.trim() || undefined,
+            baseUrl: options.warpgrep?.baseUrl?.trim() || undefined,
+            model: options.warpgrep?.model?.trim() || undefined
+          }
         })
       }
       continue
@@ -385,6 +393,7 @@ export function buildEngineRegistrations(options: {
 export async function engineStates(options: {
   config: Record<string, { enabled?: boolean; entry?: string } | undefined>
   morphApiKey?: string
+  warpgrep?: WarpGrepBackend
   toggles: Record<string, Record<string, boolean> | undefined>
   tools: Record<string, McpToolInfo[] | undefined>
   indexStatus: Record<string, { state: McpEngineState['index']; message?: string } | undefined>
@@ -392,7 +401,8 @@ export async function engineStates(options: {
   web?: { braveKey?: string; nativeProviders?: string[] }
 }): Promise<McpEngineState[]> {
   const states: McpEngineState[] = []
-  const hasKey = Boolean(options.morphApiKey?.trim())
+  const customEndpoint = Boolean(options.warpgrep?.baseUrl?.trim())
+  const hasKey = Boolean(options.warpgrep?.apiKey?.trim() || options.morphApiKey?.trim() || customEndpoint)
   const webNatives = options.web?.nativeProviders ?? []
   const webHasBrave = Boolean(options.web?.braveKey?.trim())
   const webAvailable = webHasBrave || webNatives.length > 0
@@ -412,7 +422,7 @@ export async function engineStates(options: {
     const error =
       options.gatewayErrors?.[id] ??
       detection.error ??
-      (id === 'warpgrep' && !hasKey ? '未配置 Morph API Key' : undefined) ??
+      (id === 'warpgrep' && !hasKey ? '未配置 Morph API Key 或自定义端点' : undefined) ??
       (id === 'web' && !webAvailable
         ? '未配置 Brave Search Key，也没有启用任何服务商的原生搜索'
         : undefined)
@@ -424,7 +434,9 @@ export async function engineStates(options: {
       available,
       entry:
         id === 'warpgrep'
-          ? 'api.morphllm.com/v1'
+          ? customEndpoint
+            ? `${options.warpgrep?.baseUrl?.trim()} · ${options.warpgrep?.model?.trim() || 'deepseek-flash'}`
+            : 'api.morphllm.com/v1'
           : id === 'web'
             ? webEntry
             : engine.entry?.trim() || detection.entry?.path,

@@ -557,6 +557,15 @@ export interface McpState {
   subagents: SubagentState;
   /** Masked Morph API key (`sk-w_…abcd`), never the key itself. */
   morphKeyHint?: string;
+  /** WarpGrep backend: empty `baseUrl` means the hosted Morph model. */
+  warpgrep: {
+    baseUrl?: string;
+    model?: string;
+    /** Masked key of the custom endpoint, when one was entered. */
+    keyHint?: string;
+    /** `own` = endpoint key entered, `provider` = reuse the logged-in provider, `morph`/`none`. */
+    keySource: 'own' | 'provider' | 'morph' | 'none';
+  };
   servers: McpServerInfo[];
   userConfigPath: string;
   projectConfigPath: string;
@@ -716,6 +725,12 @@ export interface PiBridge {
   setMcpEngineEnabled(id: McpEngineId, enabled: boolean): Promise<McpState>;
   setMcpEngineEntry(id: McpEngineId, entry: string | null): Promise<McpState>;
   setMorphApiKey(key: string | null): Promise<McpState>;
+  /** WarpGrep backend: a custom OpenAI-compatible endpoint; `null` clears a field. */
+  setWarpgrepBackend(patch: {
+    baseUrl?: string | null;
+    model?: string | null;
+    apiKey?: string | null;
+  }): Promise<McpState>;
   setBraveApiKey(key: string | null): Promise<McpState>;
   setWebSearchMode(mode: WebSearchMode): Promise<McpState>;
   setProviderWebSearch(providerId: string, enabled: boolean): Promise<McpState>;

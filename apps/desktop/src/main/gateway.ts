@@ -14,7 +14,7 @@ import type { McpEngineId } from '../shared/types'
 import { killTree } from './proc'
 import { createJsonLineDecoder } from './json-lines'
 import { callWebTool, WEB_TOOLS, WebError } from './web'
-import { WARPGREP_TOOL, WarpGrep, WarpGrepError } from './warpgrep'
+import { WARPGREP_TOOL, WarpGrep, WarpGrepError, type WarpGrepBackend } from './warpgrep'
 
 export interface EngineTarget {
   id: McpEngineId
@@ -29,8 +29,8 @@ export interface EngineTarget {
   /** Upstream tool names to expose; everything else is dropped. */
   allowlist: string[]
   timeoutMs: number
-  /** WarpGrep only. */
-  apiKey?: string
+  /** WarpGrep only: key plus an optional custom OpenAI-compatible endpoint. */
+  warpgrep?: WarpGrepBackend
 }
 
 interface PendingRequest {
@@ -351,7 +351,7 @@ class WarpGrepGateway {
   private failure: string | undefined
 
   constructor(readonly target: EngineTarget) {
-    this.client = new WarpGrep(target.cwd, target.apiKey ?? '')
+    this.client = new WarpGrep(target.cwd, target.warpgrep ?? {})
   }
 
   get error(): string | undefined {
@@ -369,7 +369,9 @@ class WarpGrepGateway {
           serverInfo: { name: 'agent-desktop-warpgrep', version: '0.3.0' },
           instructions:
             'WarpGrep gateway: natural-language code search over this project. File excerpts read ' +
-            'during a search are sent to the Morph API.'
+            'during a search are sent to ' +
+            (this.target.warpgrep?.baseUrl?.trim() || 'api.morphllm.com/v1') +
+            '.',
         }
       case 'ping':
         return {}
@@ -539,7 +541,7 @@ export function configure(targets: EngineTarget[], scope = ''): void {
       existing.target.kind === target.kind &&
       existing.target.command === target.command &&
       existing.target.cwd === target.cwd &&
-      existing.target.apiKey === target.apiKey &&
+      JSON.stringify(existing.target.warpgrep ?? {}) === JSON.stringify(target.warpgrep ?? {}) &&
       (existing.target.args ?? []).join('\u0000') === (target.args ?? []).join('\u0000')
     if (same) continue
     existing?.stop()

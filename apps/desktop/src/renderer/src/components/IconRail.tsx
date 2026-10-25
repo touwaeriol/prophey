@@ -13,6 +13,7 @@ import {
 export function IconRail({
   status,
   theme,
+  sidebarOpen,
   onNew,
   onToggleSidebar,
   onChooseWorkspace,
@@ -22,6 +23,7 @@ export function IconRail({
 }: {
   status: PiStatus
   theme: 'dark' | 'light'
+  sidebarOpen: boolean
   onNew: () => void
   onToggleSidebar: () => void
   onChooseWorkspace: () => void
@@ -37,7 +39,12 @@ export function IconRail({
       <button className="rail-btn" title="新建会话 (Ctrl+N)" onClick={onNew}>
         <PlusIcon size={17} />
       </button>
-      <button className="rail-btn" title="显示/隐藏侧栏" onClick={onToggleSidebar}>
+      <button
+        className={`rail-btn sidebar-toggle ${sidebarOpen ? 'on' : ''}`}
+        title={sidebarOpen ? '隐藏侧栏' : '显示侧栏'}
+        aria-pressed={sidebarOpen}
+        onClick={onToggleSidebar}
+      >
         <PanelIcon size={16} />
       </button>
       <button className="rail-btn" title="切换工作目录" onClick={onChooseWorkspace}>

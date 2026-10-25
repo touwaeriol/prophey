@@ -636,6 +636,11 @@ interface McpConfig {
   engines?: Partial<Record<McpEngineId, McpEngineConfig>>
   /** Morph API key for WarpGrep. */
   morphApiKey?: string
+  /**
+   * WarpGrep backend override: an OpenAI-compatible endpoint with tool calling (DeepSeek, OpenAI,
+   * a local vLLM). Empty means the hosted Morph model. The key falls back to `morphApiKey`.
+   */
+  warpgrep?: { baseUrl?: string; model?: string; apiKey?: string }
   /** Web search / fetch: Brave key, per-provider native search, budgets. */
   web?: web.WebConfig
   /** server -> tool -> enabled. A tool set to false is registered as `hidden`. */
@@ -885,6 +890,7 @@ async function mcpEndpointsFor(
     roots,
     config: engineConfig(),
     morphApiKey: desktopConfig.mcp?.morphApiKey,
+    warpgrep: await warpgrepBackend(),
     webAvailable: webReady()
   })
   // The endpoints must exist before anything connects to them.
@@ -1121,6 +1127,7 @@ async function mcpLaunch(
     roots,
     config: engineConfig(),
     morphApiKey: desktopConfig.mcp?.morphApiKey,
+    warpgrep: await warpgrepBackend(),
     webAvailable: webReady()
   })
   // The endpoints must exist before pi connects to them.
@@ -1340,6 +1347,7 @@ async function buildMcpState(): Promise<McpState> {
   const engineStates = await engines.engineStates({
     config: engineConfig(),
     morphApiKey: desktopConfig.mcp?.morphApiKey,
+    warpgrep: await warpgrepBackend(),
     toggles: toolToggles(),
     tools: toolCache,
     indexStatus: {
@@ -1412,6 +1420,19 @@ async function buildMcpState(): Promise<McpState> {
       configPath: agents.agentsFilePath(app.getPath('userData'))
     },
     morphKeyHint: maskKey(desktopConfig.mcp?.morphApiKey),
+    warpgrep: {
+      baseUrl: desktopConfig.mcp?.warpgrep?.baseUrl,
+      model: desktopConfig.mcp?.warpgrep?.model,
+      keyHint: maskKey(desktopConfig.mcp?.warpgrep?.apiKey),
+      /** Where the key comes from when `keyHint` is empty: the provider already logged in. */
+      keySource: desktopConfig.mcp?.warpgrep?.apiKey
+        ? 'own'
+        : desktopConfig.mcp?.warpgrep?.baseUrl
+          ? 'provider'
+          : desktopConfig.mcp?.morphApiKey
+            ? 'morph'
+            : 'none'
+    },
     servers,
     userConfigPath: profile.mcpPath(),
     projectConfigPath: mcp.projectMcpPath(status.cwd),
@@ -2443,6 +2464,48 @@ function registerIpc(): void {
     return buildMcpState()
   })
 
+  /**
+   * WarpGrep backend: an OpenAI-compatible endpoint plus its model and key. Empty `baseUrl` goes
+   * back to the hosted Morph model; an empty key falls back to the stored provider credential.
+   */
+  handle(
+    'mcp:set-warpgrep',
+    async (_event, patch: { baseUrl?: string | null; model?: string | null; apiKey?: string | null }) => {
+      const current = { ...(desktopConfig.mcp?.warpgrep ?? {}) }
+      if ('baseUrl' in patch) {
+        const baseUrl = patch.baseUrl?.trim()
+        if (baseUrl) {
+          let parsed: URL | undefined
+          try {
+            parsed = new URL(baseUrl)
+          } catch {
+            throw new Error('端点地址不是合法 URL')
+          }
+          if (!/^https?:$/.test(parsed.protocol)) throw new Error('端点必须是 http(s) 地址')
+          current.baseUrl = baseUrl.replace(/\/+$/, '')
+        } else {
+          delete current.baseUrl
+        }
+      }
+      if ('model' in patch) {
+        const model = patch.model?.trim()
+        if (model) current.model = model
+        else delete current.model
+      }
+      if ('apiKey' in patch) {
+        const key = patch.apiKey?.trim()
+        if (key) current.apiKey = key
+        else delete current.apiKey
+      }
+      const next = { ...desktopConfig.mcp }
+      if (Object.keys(current).length > 0) next.warpgrep = current
+      else delete next.warpgrep
+      await saveConfig({ mcp: next })
+      await reloadPiConfig()
+      return buildMcpState()
+    }
+  )
+
   handle('mcp:set-brave-key', async (_event, key: string | null) => {
     await saveWebConfig({ braveApiKey: key && key.trim() ? key.trim() : undefined })
     await reloadPiConfig()
@@ -2988,6 +3051,28 @@ function registerIpc(): void {
       }
     }
   )
+}
+
+/**
+ * The WarpGrep backend actually used: a custom OpenAI-compatible endpoint when one is configured,
+ * else the hosted Morph model. The key falls back to the provider credential the user already
+ * stored (DeepSeek / OpenAI), so a custom URL never asks for the same key twice.
+ */
+async function warpgrepBackend(): Promise<{ baseUrl?: string; model?: string; apiKey?: string }> {
+  const configured = desktopConfig.mcp?.warpgrep ?? {}
+  const baseUrl = configured.baseUrl?.trim() || undefined
+  const model = configured.model?.trim() || undefined
+  let apiKey = configured.apiKey?.trim() || undefined
+  if (!apiKey && baseUrl) {
+    const provider = /deepseek/i.test(baseUrl)
+      ? "deepseek"
+      : /openai/i.test(baseUrl)
+        ? "openai"
+        : undefined
+    if (provider) apiKey = await providers.providerApiKey(provider)
+  }
+  apiKey = apiKey || desktopConfig.mcp?.morphApiKey?.trim() || undefined
+  return { baseUrl, model, apiKey }
 }
 
 function createWindow(): void {

@@ -202,6 +202,17 @@ button:disabled {
   color: var(--text);
 }
 
+/* The rail's sidebar switch shows the same on/off chip as the title-bar one. */
+.rail-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.rail-btn.on:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
 .rail-btn.alert {
   color: var(--danger);
 }
@@ -754,6 +765,13 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* The title bar is a drag region, so its buttons must opt out or the mouse press only
+   starts a window move and the click never reaches them (sidebar toggle, panel, agents). */
+.tabbar-right .icon-btn,
+.tabbar-right .subagent-btn {
+  -webkit-app-region: no-drag;
 }
 
 /* The sidebar toggle sits on the window chrome: give it a visible chip instead of a ghost icon. */
@@ -4423,6 +4441,20 @@ button:disabled {
   background: var(--bg-input);
   color: var(--text);
   font-size: 11px;
+}
+
+/* WarpGrep's endpoint row carries two inputs plus up to two buttons: let it wrap instead of
+   squeezing the URL down to a few characters on a narrow settings pane. */
+.mcp-key-row.mcp-endpoint-row {
+  flex-wrap: wrap;
+}
+
+.mcp-endpoint-row input:first-of-type {
+  flex: 2 1 240px;
+}
+
+.mcp-endpoint-row input {
+  flex: 1 1 140px;
 }
 
 .mcp-tools-block {

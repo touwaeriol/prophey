@@ -70,7 +70,7 @@ if (!process.versions.electron) {
         await until('!!document.querySelector(".tabbar")', 'title bar')
         win.setSize(1280, 880)
         await pause(300)
-        await evaluate('document.querySelector(".tabbar .icon-btn[title^=\\"显示/隐藏会话概览\\"]").click()')
+        await evaluate('document.querySelector(".tabbar .panel-toggle").click()')
         await until('!!document.querySelector(".session-panel")', 'panel')
         // Folded is the default view (each row carries its own summary); capture it before expanding.
         fs.mkdirSync(output, { recursive: true })

@@ -43,6 +43,7 @@ import {
   serializeComposers,
   type SessionComposerMap
 } from './lib/session-composer'
+import { PANEL_OPEN_KEY, SIDEBAR_OPEN_KEY, readLayoutFlag, writeLayoutFlag } from './lib/layout-prefs'
 import { updateStatusText } from './lib/updates'
 import { toChatItems, type ChatItem } from './lib/messages'
 import { messagesBelong } from './lib/session-messages'
@@ -141,21 +142,15 @@ export default function App(): React.JSX.Element {
     tokens?: number
   }>({ runningTools: 0 })
   const [, setTick] = useState(0)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  /** Right-hand inspector; persisted so the layout survives a restart like the sidebar does. */
-  const [panelOpen, setPanelOpen] = useState(() => {
-    try {
-      return localStorage.getItem('pi-session-panel') === '1'
-    } catch {
-      return false
-    }
-  })
+  /** Left sidebar; open by default, and remembered like the inspector below. */
+  const [sidebarOpen, setSidebarOpen] = useState(() => readLayoutFlag(SIDEBAR_OPEN_KEY, true))
   useEffect(() => {
-    try {
-      localStorage.setItem('pi-session-panel', panelOpen ? '1' : '0')
-    } catch {
-      // private mode / storage disabled: the panel just starts closed next time
-    }
+    writeLayoutFlag(SIDEBAR_OPEN_KEY, sidebarOpen)
+  }, [sidebarOpen])
+  /** Right-hand inspector; persisted so the layout survives a restart like the sidebar does. */
+  const [panelOpen, setPanelOpen] = useState(() => readLayoutFlag(PANEL_OPEN_KEY, false))
+  useEffect(() => {
+    writeLayoutFlag(PANEL_OPEN_KEY, panelOpen)
   }, [panelOpen])
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -1190,6 +1185,7 @@ export default function App(): React.JSX.Element {
       <IconRail
         status={status}
         theme={theme}
+        sidebarOpen={sidebarOpen}
         onNew={() => void chooseWorkspace()}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         onChooseWorkspace={() => void chooseWorkspace()}

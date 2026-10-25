@@ -20,7 +20,7 @@ module.exports = async function sessionPanelSmoke(evaluate, until, window) {
   // The panel's open state persists in localStorage; make sure this run starts with it open.
   await evaluate(`(() => {
     if (!document.querySelector('.session-panel')) {
-      document.querySelector('.tabbar .icon-btn[title^="显示/隐藏会话概览"]').click();
+      document.querySelector('.tabbar .panel-toggle').click();
     }
   })()`)
   await until(() => evaluate('!!document.querySelector(".session-panel")'), 'session panel')

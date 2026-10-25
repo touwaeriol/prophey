@@ -236,12 +236,14 @@ function EngineCard({
   busy,
   current,
   morphKeyHint,
+  warpgrep,
   web,
   onToggle,
   onPickEntry,
   onClearEntry,
   onBuildIndex,
   onSaveKey,
+  onSaveWarpgrep,
   onSaveBraveKey,
   onSetWebMode,
   onToggleTool,
@@ -251,17 +253,25 @@ function EngineCard({
   /** Engine of the open session, so the row can say when it does not apply. */
   current?: EngineId;
   morphKeyHint?: string;
+  warpgrep?: McpState["warpgrep"];
   web?: McpWebState;
   onToggle: (id: McpEngineId, enabled: boolean) => void;
   onPickEntry: (id: McpEngineId) => void;
   onClearEntry: (id: McpEngineId) => void;
   onBuildIndex: () => void;
   onSaveKey: (key: string | null) => void;
+  onSaveWarpgrep: (patch: {
+    baseUrl?: string | null;
+    model?: string | null;
+    apiKey?: string | null;
+  }) => void;
   onSaveBraveKey: (key: string | null) => void;
   onSetWebMode: (mode: WebSearchMode) => void;
   onToggleTool: (server: string, tool: string, enabled: boolean) => void;
 }): React.JSX.Element {
   const [keyDraft, setKeyDraft] = useState("");
+  const [endpointDraft, setEndpointDraft] = useState("");
+  const [modelDraft, setModelDraft] = useState("");
   const [braveDraft, setBraveDraft] = useState("");
   const indexLabel: Record<string, string> = {
     indexed: "已索引",
@@ -318,7 +328,8 @@ function EngineCard({
           )}
           {isWarpGrep && (
             <p className="field-hint">
-              搜索过程中读取的代码片段会发送到 Morph API。
+              搜索过程中读取的代码片段会发送到{" "}
+              {warpgrep?.baseUrl ? `自定义端点（${warpgrep.baseUrl}）` : "Morph API"}。
             </p>
           )}
           {isWeb && web && (
@@ -422,38 +433,93 @@ function EngineCard({
               </div>
             </>
           ) : isWarpGrep ? (
-            <div className="mcp-key-row">
-              <input
-                type="password"
-                value={keyDraft}
-                placeholder={
-                  morphKeyHint
-                    ? `已保存 ${morphKeyHint}，输入新 Key 覆盖`
-                    : "sk-..."
-                }
-                onChange={(event) => setKeyDraft(event.target.value)}
-                spellCheck={false}
-              />
-              <button
-                className="ghost"
-                disabled={busy || !keyDraft.trim()}
-                onClick={() => {
-                  onSaveKey(keyDraft.trim());
-                  setKeyDraft("");
-                }}
-              >
-                保存 Key
-              </button>
-              {morphKeyHint && (
+            <>
+              <div className="mcp-key-row mcp-endpoint-row">
+                <input
+                  value={endpointDraft}
+                  placeholder={
+                    warpgrep?.baseUrl
+                      ? `当前 ${warpgrep.baseUrl}，输入新地址覆盖`
+                      : "自定义端点，如 https://api.deepseek.com/v1（留空用 Morph）"
+                  }
+                  onChange={(event) => setEndpointDraft(event.target.value)}
+                  spellCheck={false}
+                />
+                <input
+                  value={modelDraft}
+                  placeholder={warpgrep?.model ?? "模型，如 deepseek-flash"}
+                  onChange={(event) => setModelDraft(event.target.value)}
+                  spellCheck={false}
+                />
                 <button
                   className="ghost"
                   disabled={busy}
-                  onClick={() => onSaveKey(null)}
+                  onClick={() => {
+                    onSaveWarpgrep({
+                      baseUrl: endpointDraft.trim() || warpgrep?.baseUrl || null,
+                      model: modelDraft.trim() || warpgrep?.model || null,
+                    });
+                    setEndpointDraft("");
+                    setModelDraft("");
+                  }}
                 >
-                  清除
+                  保存端点
                 </button>
-              )}
-            </div>
+                {warpgrep?.baseUrl && (
+                  <button
+                    className="ghost"
+                    disabled={busy}
+                    onClick={() => {
+                      setEndpointDraft("");
+                      setModelDraft("");
+                      onSaveWarpgrep({ baseUrl: null, model: null });
+                    }}
+                  >
+                    用回 Morph
+                  </button>
+                )}
+              </div>
+              <div className="mcp-key-row">
+                <input
+                  type="password"
+                  value={keyDraft}
+                  placeholder={
+                    warpgrep?.keyHint
+                      ? `已保存 ${warpgrep.keyHint}，输入新 Key 覆盖`
+                      : warpgrep?.baseUrl && warpgrep.keySource === "provider"
+                        ? "留空则复用服务商里已登录的 Key"
+                        : morphKeyHint
+                          ? `已保存 ${morphKeyHint}，输入新 Key 覆盖`
+                          : "sk-..."
+                  }
+                  onChange={(event) => setKeyDraft(event.target.value)}
+                  spellCheck={false}
+                />
+                <button
+                  className="ghost"
+                  disabled={busy || !keyDraft.trim()}
+                  onClick={() => {
+                    if (warpgrep?.baseUrl) onSaveWarpgrep({ apiKey: keyDraft.trim() });
+                    else onSaveKey(keyDraft.trim());
+                    setKeyDraft("");
+                  }}
+                >
+                  保存 Key
+                </button>
+                {(warpgrep?.keyHint || morphKeyHint) && (
+                  <button
+                    className="ghost"
+                    disabled={busy}
+                    onClick={() => {
+                      if (warpgrep?.keyHint) onSaveWarpgrep({ apiKey: null });
+                      else onSaveKey(null);
+                    }}
+                  >
+                    清除
+                  </button>
+                )}
+              </div>
+            </>
           ) : (
             <div className="mcp-engine-actions">
               <button
@@ -615,6 +681,18 @@ export function McpPanel({
     [run],
   );
 
+  const saveWarpgrep = useCallback(
+    (patch: { baseUrl?: string | null; model?: string | null; apiKey?: string | null }) => {
+      void run(
+        () => window.pi.setWarpgrepBackend(patch),
+        "baseUrl" in patch && !patch.baseUrl
+          ? "已恢复使用 Morph"
+          : "WarpGrep 端点已更新",
+      );
+    },
+    [run],
+  );
+
   const saveBraveKey = useCallback(
     (key: string | null) => {
       void run(
@@ -720,6 +798,7 @@ export function McpPanel({
               busy={busy}
               current={current}
               morphKeyHint={state.morphKeyHint}
+              warpgrep={state.warpgrep}
               web={state.web}
               onToggle={(id, enabled) =>
                 void run(
@@ -739,6 +818,7 @@ export function McpPanel({
                 })
               }
               onSaveKey={saveKey}
+              onSaveWarpgrep={saveWarpgrep}
               onSaveBraveKey={saveBraveKey}
               onSetWebMode={setWebMode}
               onToggleTool={toggleTool}

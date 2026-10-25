@@ -1,19 +1,31 @@
 /**
- * WarpGrep (Morph) code search, served as a project-scoped read-only MCP tool by the gateway.
+ * WarpGrep code search, served as a project-scoped read-only MCP tool by the gateway.
  *
- * The model asks a natural-language question; Morph plans grep/list/glob/read calls, this module
- * executes them inside the session directory and returns the relevant files and line ranges. File
- * excerpts read during the search are sent to the Morph API, which is why the engine is opt-in.
+ * The model asks a natural-language question; a search subagent plans grep/list/glob/read calls, this
+ * module executes them inside the session directory and returns the relevant files and line ranges.
+ * File excerpts read during the search are sent to the configured endpoint, which is why the engine
+ * is opt-in.
  *
- * Tool semantics follow `@morphllm/morphsdk`'s `warp_grep` tool, so the model sees the tool names
- * it was trained on (`grep_search`, `list_directory`, `glob`, `read`, `finish`).
+ * Two backends share one tool contract:
+ * - **Morph** (default): the hosted `morph-warp-grep-v2.1` model, which was trained on the tool names
+ *   below and needs no system prompt.
+ * - **Custom endpoint** (`warpgrep.baseUrl`): any OpenAI-compatible chat model with tool calling
+ *   (DeepSeek, OpenAI, a local vLLM). That path runs the shared loop in
+ *   `packages/warpgrep-mcp/search.mjs` — the same code the standalone MCP server runs — because a
+ *   general model needs the system prompt, the `finish` fallback and path verification.
  */
+import { SearchError, searchCodebase } from '../../../../packages/warpgrep-mcp/search.mjs'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
 const MODEL = 'morph-warp-grep-v2.1'
+/** Used when a custom endpoint is configured without a model. */
+export const CUSTOM_DEFAULT_MODEL = 'deepseek-flash'
 const API_BASE = process.env.AGENT_DESKTOP_MORPH_BASE ?? 'https://api.morphllm.com/v1'
 const MAX_TURNS = 6
+/** Custom endpoints get a tighter whole-search budget than Morph: they are slower per turn. */
+const CUSTOM_TOTAL_TIMEOUT_MS = 90_000
+const CUSTOM_TURN_TIMEOUT_MS = 45_000
 const MAX_CONTEXT_CHARS = 321_600
 const MAX_OUTPUT_LINES = 200
 const MAX_LIST_RESULTS = 500
@@ -285,18 +297,53 @@ async function readLines(
   return { text: out.join('\n'), truncated: false }
 }
 
+/** Where WarpGrep sends its questions: the hosted Morph model, or a custom endpoint. */
+export interface WarpGrepBackend {
+  apiKey?: string
+  /** OpenAI-compatible base URL (`…/v1`). Absent/empty means the hosted Morph API. */
+  baseUrl?: string
+  /** Chat model with tool calling; defaults to Morph's model or `deepseek-flash`. */
+  model?: string
+}
+
+export interface ResolvedWarpGrepBackend {
+  baseUrl: string
+  model: string
+  apiKey: string
+  /** True for the hosted Morph model (no system prompt, no nudge, `finish` only). */
+  hosted: boolean
+}
+
+export function resolveWarpGrepBackend(backend: WarpGrepBackend = {}): ResolvedWarpGrepBackend {
+  const configured = backend.baseUrl?.trim()
+  const baseUrl = (configured || API_BASE).replace(/\/+$/, '')
+  const hosted = !configured || /(^|\.)morphllm\.com/i.test(baseUrl)
+  return {
+    baseUrl,
+    hosted,
+    model: backend.model?.trim() || (hosted ? MODEL : CUSTOM_DEFAULT_MODEL),
+    apiKey: backend.apiKey?.trim() ?? ''
+  }
+}
+
 export class WarpGrep {
+  private readonly key: string
+  private readonly backend: WarpGrepBackend
+
   constructor(
     private readonly cwd: string,
-    private readonly apiKey: string
-  ) {}
+    backend: WarpGrepBackend = {}
+  ) {
+    this.backend = backend
+    this.key = backend.apiKey?.trim() ?? ''
+  }
 
   private async complete(messages: MorphMessage[], maxTokens: number): Promise<MorphMessage> {
     const response = await fetch(`${API_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${this.apiKey}`
+        authorization: `Bearer ${this.key}`
       },
       body: JSON.stringify({
         model: MODEL,
@@ -440,8 +487,21 @@ export class WarpGrep {
   }
 
   /** Run the search loop and return the files the model settled on. */
-  async search(searchString: string): Promise<{ files: string; answer?: string }> {
-    if (!this.apiKey) throw new WarpGrepError('MORPH_NO_KEY', '未配置 Morph API Key')
+  /**
+   * Run the search and return what the model settled on. The backend decides which loop runs; both
+   * return `path:start-end` lines relative to the session directory.
+   */
+  async search(
+    searchString: string
+  ): Promise<{ files: string; answer?: string; dropped?: string[] }> {
+    const backend = resolveWarpGrepBackend(this.backend)
+    if (!backend.apiKey) {
+      throw new WarpGrepError(
+        'WARP_NO_KEY',
+        backend.hosted ? '未配置 Morph API Key' : `未配置 ${new URL(backend.baseUrl).host} 的 API Key`
+      )
+    }
+    if (!backend.hosted) return this.searchCustom(searchString, backend)
     const messages: MorphMessage[] = [{ role: 'user', content: searchString }]
     for (let turn = 0; turn < MAX_TURNS; turn += 1) {
       const size = messages.reduce((sum, message) => sum + (message.content?.length ?? 0), 0)
@@ -475,6 +535,32 @@ export class WarpGrep {
     throw new WarpGrepError('WARPGREP_INCOMPLETE', 'WarpGrep 在 6 轮内没有给出结论，请缩小问题范围')
   }
 
+  /**
+   * Custom endpoint: the same loop the standalone `warpgrep-mcp` server runs. A general chat model
+   * needs the system prompt and the `finish` fallback Morph does not, and every path it reports is
+   * verified against the filesystem before it reaches the model.
+   */
+  private async searchCustom(
+    searchString: string,
+    backend: ResolvedWarpGrepBackend
+  ): Promise<{ files: string; answer?: string; dropped?: string[] }> {
+    try {
+      const result = await searchCodebase(searchString, {
+        cwd: this.cwd,
+        baseUrl: backend.baseUrl,
+        model: backend.model,
+        key: backend.apiKey,
+        maxTurns: MAX_TURNS,
+        turnTimeoutMs: CUSTOM_TURN_TIMEOUT_MS,
+        totalTimeoutMs: CUSTOM_TOTAL_TIMEOUT_MS
+      })
+      return { files: result.files, answer: result.answer, dropped: result.dropped }
+    } catch (error) {
+      if (error instanceof SearchError) throw new WarpGrepError(error.code, error.message)
+      throw error
+    }
+  }
+
   /** Read the listed ranges, used by `includeSource`. */
   async sources(files: string, budget: number): Promise<string> {
     const blocks: string[] = []
@@ -506,11 +592,11 @@ export const WARPGREP_TOOL = {
   name: 'codebase_search',
   title: 'WarpGrep codebase search',
   description:
-    'Natural-language code search subagent (Morph WarpGrep) for this project. It runs several ' +
-    'rounds of grep, file listing and reads inside the project, then returns the relevant files ' +
-    'and line ranges; set includeSource=true to also get their code. Use a targeted question such ' +
-    'as "Where are HTTP routes authenticated?", not bare keywords or a symbol name. Results may be ' +
-    'partial. File excerpts read during the search are sent to the Morph API.',
+    'Natural-language code search subagent for this project. It runs several rounds of grep, file ' +
+    'listing and reads inside the project, then returns the relevant files and line ranges; set ' +
+    'includeSource=true to also get their code. Use a targeted question such as "Where are HTTP ' +
+    'routes authenticated?", not bare keywords or a symbol name. Results may be partial. File ' +
+    'excerpts read during the search are sent to the configured model endpoint.',
   inputSchema: {
     type: 'object',
     properties: {

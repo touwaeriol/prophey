@@ -5,13 +5,14 @@ const os = require('node:os')
 const path = require('node:path')
 const esbuild = require('esbuild')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'prophey-renderer-tests-'))
-for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'actions', 'subagents']) {
+for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'actions', 'subagents', 'layout-prefs']) {
   esbuild.buildSync({ entryPoints: [path.resolve(__dirname, '../apps/desktop/src/renderer/src/lib', name + '.ts')], outfile: path.join(temp, name + '.cjs'), bundle: true, platform: 'node', format: 'cjs' })
 }
 after(() => fs.rmSync(temp, { recursive: true, force: true }))
 const { applyConversationEvent: apply } = require(path.join(temp, 'conversation-events.cjs'))
 const { toChatItems } = require(path.join(temp, 'messages.cjs'))
 const { insertFileMention } = require(path.join(temp, 'composer.cjs'))
+const { SIDEBAR_OPEN_KEY, PANEL_OPEN_KEY, readLayoutFlag, writeLayoutFlag } = require(path.join(temp, 'layout-prefs.cjs'))
 const event = (items, type, fields = {}) => apply(items, { type, ...fields }, 123)
 
 test('renderer: native string messages survive both streaming and session restore', () => {
@@ -250,4 +251,24 @@ test('renderer: failed saves preserve draft, release busy and report result or t
 test('renderer: shared subagent state excludes settled and restored stopped runs', () => {
   for (const status of ['starting', 'streaming']) assert.equal(isSubagentRunning({ status }), true)
   for (const status of ['idle', 'error', 'stopped']) assert.equal(isSubagentRunning({ status }), false)
+})
+
+test('renderer: sidebar and panel layout flags round-trip and fall back to their defaults', () => {
+  const memory = new Map()
+  const store = { getItem: key => (memory.has(key) ? memory.get(key) : null), setItem: (key, value) => memory.set(key, value) }
+  // Nothing stored yet: each switch starts from its own default (sidebar open, inspector closed).
+  assert.equal(readLayoutFlag(SIDEBAR_OPEN_KEY, true, store), true)
+  assert.equal(readLayoutFlag(PANEL_OPEN_KEY, false, store), false)
+  // A collapsed sidebar is remembered as "0" and read back as closed. Only "1"/"0" count.
+  writeLayoutFlag(SIDEBAR_OPEN_KEY, false, store)
+  assert.equal(memory.get(SIDEBAR_OPEN_KEY), '0')
+  assert.equal(readLayoutFlag(SIDEBAR_OPEN_KEY, true, store), false)
+  writeLayoutFlag(PANEL_OPEN_KEY, true, store)
+  assert.equal(readLayoutFlag(PANEL_OPEN_KEY, false, store), true)
+  memory.set(SIDEBAR_OPEN_KEY, 'garbage')
+  assert.equal(readLayoutFlag(SIDEBAR_OPEN_KEY, true, store), true, 'unknown values fall back to the default')
+  // A disabled store (private mode) must never break the layout code path.
+  const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } }
+  assert.equal(readLayoutFlag(SIDEBAR_OPEN_KEY, true, broken), true)
+  writeLayoutFlag(SIDEBAR_OPEN_KEY, false, broken)
 })

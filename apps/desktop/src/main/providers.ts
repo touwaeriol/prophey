@@ -436,8 +436,24 @@ export async function setCompactionSettings(next: {
   invalidateCache()
 }
 
-export async function getAppSettings(): Promise<AppSettings> {
-  const raw = await readRawSettings()
+/**
+ * The stored API key of one provider, for features that call a provider's own endpoint (the custom
+ * WarpGrep backend). Returns `undefined` for OAuth-only providers and unreadable auth files.
+ */
+export async function providerApiKey(providerId: string): Promise<string | undefined> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(authPath(), 'utf8')) as Record<
+      string,
+      { type?: string; key?: unknown } | undefined
+    >
+    const key = parsed?.[providerId]?.key
+    return typeof key === 'string' && key.trim() ? key.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export async function getAppSettings(): Promise<AppSettings> {  const raw = await readRawSettings()
   const compaction = (raw.compaction as Record<string, unknown> | undefined) ?? {}
   return {
     defaultProvider:
