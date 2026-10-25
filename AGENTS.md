@@ -260,6 +260,9 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 ## Updates & packaging
 
 - 更新实现：`apps/desktop/src/main/updates.ts` 使用 `electron-updater`。打包版走 electron-updater（GitHub Release 的 `latest.yml` + NSIS 安装包）；开发模式用 GitHub Release API 只做版本检测，`canInstall=false`。启动 5 秒后及每 6 小时自动检查，开关存在 userData 的 `updates.json`。
+- **更新必须是不用重新安装的那种（参数来源：`codegraph-desktop` 的 Tauri updater 用 `installMode: "passive"`，只显示进度、没有向导）**：检查到新版本就**自动后台下载**（`autoDownload` 开关，默认开），下载完显示「已下载，退出应用时自动安装」，`autoInstallOnAppQuit` 在退出时执行；点「立即重启安装」走 `quitAndInstall(true, true)` —— **第一个参数必须为 true（静默）**。助手式 NSIS 安装器在 `--updated` 时只跳过 license / 目录页（`assistedInstaller.nsh` 的 `skipPageIfUpdated`），**安装模式页仍会弹出**，所以不带 `/S` 就变成“像在重新安装”。另外把 `autoUpdater.installDirectory` 钉到 `dirname(app.getPath('exe'))`（`/D=` 参数），静默升级才会装回原目录，而不是 NSIS 的默认位置。
+- 状态语义：`preparing` = 安装包已落盘但还没装，**不算 busy**（用户可以继续工作或退出让它装），只有 `checking/downloading/installing` 算忙；`cancel()` 把下载中的状态退回 `available`。
+- 与 `codegraph-desktop` 的另一个差别：那边用 minisign 公钥 + `requireSignedVersion: true` 验签名；我们只有 `latest.yml` 里的 sha512 + HTTPS（没有代码签名证书）。要缩短这个差距得先买证书，别只改配置。
 - 更新源默认 `touwaeriol/prophey`，可用环境变量覆盖：`PI_DESKTOP_UPDATE_REPO=owner/repo`、`PI_DESKTOP_UPDATE_URL=<generic feed>`、`PI_DESKTOP_RELEASES_URL=<发布页>`。`electron-builder.yml` 的 `publish` 也要同步 owner/repo。
 - 打包：根目录 `npm run dist`（`electron-builder.yml`，NSIS，输出 `release/`）。`asarUnpack` 包含 `@earendil-works/**`、`quickjs-wasi`、`@silvia-odwyer/**`；`findBundledCli` 在打包版优先从 `process.resourcesPath/app.asar.unpacked` 找 pi CLI。
 - 系统代理：`proxy.ts` 用 `session.resolveProxy` 解析系统代理，设置 `HTTP(S)_PROXY`/`NO_PROXY`/`NODE_USE_ENV_PROXY`，并通过 `setGlobalDispatcher(new EnvHttpProxyAgent())` 让主进程 fetch 走代理；pi 子进程继承同一环境。设置页「网络代理」显示检测结果。

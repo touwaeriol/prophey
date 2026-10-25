@@ -195,6 +195,7 @@ export default function App(): React.JSX.Element {
     downloaded: 0,
     total: null,
     autoCheck: true,
+    autoDownload: true,
     canInstall: false,
     releasesUrl: '',
     error: null
@@ -1644,6 +1645,7 @@ export default function App(): React.JSX.Element {
         onInstallUpdate={() => void window.pi.installUpdate().then(setUpdate)}
         onCancelUpdate={() => void window.pi.cancelUpdateDownload().then(setUpdate)}
         onSetAutoUpdate={(enabled) => void window.pi.setAutoUpdateCheck(enabled).then(setUpdate)}
+        onSetAutoDownload={(enabled) => void window.pi.setAutoUpdateDownload(enabled).then(setUpdate)}
         onOpenReleases={() => void window.pi.openExternal(update.releasesUrl)}
         onClose={() => setSettingsOpen(false)}
         onRestart={restart}

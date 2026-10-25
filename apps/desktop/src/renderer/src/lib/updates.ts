@@ -9,11 +9,11 @@ export function updateStatusText(snapshot: AppUpdateSnapshot): string {
     case 'upToDate':
       return '已是最新版本'
     case 'downloading':
-      return '正在下载更新…'
+      return '正在后台下载更新…'
     case 'preparing':
-      return '下载完成，准备安装…'
+      return '已下载，退出应用时自动安装'
     case 'installing':
-      return '正在安装，应用将自动重启…'
+      return '正在静默安装，应用即将重启…'
     case 'error':
       return '更新未完成'
     default:
@@ -27,5 +27,7 @@ export function updateProgress(snapshot: AppUpdateSnapshot): number | null {
 }
 
 export function updateBusy(snapshot: AppUpdateSnapshot): boolean {
-  return ['checking', 'downloading', 'preparing', 'installing'].includes(snapshot.status)
+  // `preparing` is settled work: the installer is on disk and the user may keep working (or quit,
+  // which installs it). Only an in-flight operation blocks the buttons.
+  return ['checking', 'downloading', 'installing'].includes(snapshot.status)
 }

@@ -2095,6 +2095,7 @@ function registerIpc(): void {
   handle('updates:install', () => updates.install())
   handle('updates:cancel', () => updates.cancel())
   handle('updates:auto', (_event, enabled: boolean) => updates.setAuto(enabled))
+  handle('updates:auto-download', (_event, enabled: boolean) => updates.setAutoDownload(enabled))
   handle('app:proxy', () => getProxyInfo())
 
   handle('desktop:set-default-engine', async (_event, next: EngineId) => {

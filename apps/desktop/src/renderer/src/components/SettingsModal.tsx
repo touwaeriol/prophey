@@ -154,6 +154,7 @@ export function SettingsModal({
   onInstallUpdate,
   onCancelUpdate,
   onSetAutoUpdate,
+  onSetAutoDownload,
   onOpenReleases,
   onClose,
   onRestart,
@@ -169,6 +170,7 @@ export function SettingsModal({
   onInstallUpdate: () => void
   onCancelUpdate: () => void
   onSetAutoUpdate: (enabled: boolean) => void
+  onSetAutoDownload: (enabled: boolean) => void
   onOpenReleases: () => void
   onClose: () => void
   onRestart: () => Promise<void> | void
@@ -1131,9 +1133,9 @@ export function SettingsModal({
                       </button>
                       {update.canInstall &&
                         update.latestVersion &&
-                        update.status === 'available' && (
+                        (update.status === 'available' || update.status === 'preparing') && (
                           <button className="primary" onClick={onInstallUpdate}>
-                            下载并安装
+                            {update.status === 'preparing' ? '立即重启安装' : '下载并安装'}
                           </button>
                         )}
                       {update.status === 'downloading' && (
@@ -1182,6 +1184,14 @@ export function SettingsModal({
                         onChange={(event) => onSetAutoUpdate(event.target.checked)}
                       />
                       自动检查更新（启动后及每 6 小时）
+                    </label>
+                    <label className="update-auto">
+                      <input
+                        type="checkbox"
+                        checked={update.autoDownload}
+                        onChange={(event) => onSetAutoDownload(event.target.checked)}
+                      />
+                      自动下载更新（退出应用时静默安装，不弹安装向导）
                     </label>
                     <button className="update-link" onClick={onOpenReleases}>
                       打开 GitHub 发布页

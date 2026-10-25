@@ -352,6 +352,8 @@ export interface AppUpdateSnapshot {
   downloaded: number;
   total: number | null;
   autoCheck: boolean;
+  /** Download the next version without asking; the install itself is still silent and on quit. */
+  autoDownload: boolean;
   canInstall: boolean;
   releasesUrl: string;
   error: { code: string; message: string } | null;
@@ -637,6 +639,7 @@ export interface PiBridge {
   installUpdate(): Promise<AppUpdateSnapshot>;
   cancelUpdateDownload(): Promise<AppUpdateSnapshot>;
   setAutoUpdateCheck(enabled: boolean): Promise<AppUpdateSnapshot>;
+  setAutoUpdateDownload(enabled: boolean): Promise<AppUpdateSnapshot>;
   onUpdate(listener: (snapshot: AppUpdateSnapshot) => void): () => void;
   getProxyInfo(): Promise<ProxyInfo>;
   chooseWorkspace(options?: SessionSwitchOptions): Promise<PiStatus | null>;

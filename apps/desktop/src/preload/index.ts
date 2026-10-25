@@ -59,6 +59,8 @@ const bridge: PiBridge = {
   cancelUpdateDownload: () => ipcRenderer.invoke('updates:cancel') as Promise<AppUpdateSnapshot>,
   setAutoUpdateCheck: (enabled: boolean) =>
     ipcRenderer.invoke('updates:auto', enabled) as Promise<AppUpdateSnapshot>,
+  setAutoUpdateDownload: (enabled: boolean) =>
+    ipcRenderer.invoke('updates:auto-download', enabled) as Promise<AppUpdateSnapshot>,
   onUpdate: (listener) => subscribe('app-update', listener),
   getProxyInfo: () => ipcRenderer.invoke('app:proxy'),
   chooseWorkspace: (options?: { stop?: boolean }) =>
