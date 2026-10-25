@@ -11,6 +11,7 @@ import * as providers from '../providers'
 import * as speed from '../speed'
 import type { TranscriptStore, StoredTranscript } from '../transcript-store'
 import { loadMcpTools } from './mcp-client'
+import { orderToolResults } from './transcript-order'
 import {
   bridgeContext,
   loadAskTool,
@@ -44,6 +45,14 @@ export class PropheyEngine implements AgentEngine {
   private lastAbortAt = 0
   private levels: string[] = []
   private restoring = false
+  /**
+   * True while tool results are still owed. Nothing may be appended to the transcript meanwhile:
+   * a user turn between the model's tool calls and their results makes the next request invalid on
+   * every OpenAI-compatible provider. See `steer` and `transcript-order.ts`.
+   */
+  private toolBatchOpen = false
+  /** Turns the user steered while a batch was open; appended once its results are in. */
+  private queuedSteers: Array<Record<string, unknown>> = []
   /**
    * Prompt size the provider reported for the newest request, plus how much transcript it covered.
    *
@@ -471,7 +480,7 @@ export class PropheyEngine implements AgentEngine {
 
 用户额外要求：${instructions.trim()}`
               : ''),
-          messages: structuredClone(this.transcript) as never
+          messages: orderToolResults(structuredClone(this.transcript)) as never
         },
         { signal }
       ) as AsyncIterable<Record<string, unknown>>, this.controller.signal, this.options.streamIdleTimeoutMs ?? 180_000)
@@ -554,7 +563,7 @@ ${text.trim()}`,
     this.sessionId = id
     this.tools = undefined
     if (stored.workspace.primary) this.roots = stored.workspace
-    this.transcript = stored.messages
+    this.transcript = orderToolResults(stored.messages)
     this.resetUsage()
     await this.restorePreferences(stored)
     this.setStatus({ sessionFile: this.transcriptPath() })
@@ -620,7 +629,7 @@ ${text.trim()}`,
     if (!store || !this.sessionId) return
     const stored = await store.load(this.sessionId).catch(() => undefined)
     if (!stored) return
-    this.transcript = stored.messages
+    this.transcript = orderToolResults(stored.messages)
     this.resetUsage()
     await this.restorePreferences(stored)
     // The window draws the transcript from the engine, so it has to hear about the restored one.
@@ -767,6 +776,8 @@ ${text.trim()}`,
   }
 
   private drainNotices(): boolean {
+    // A notice is a user turn too: it must not slip between tool calls and their results.
+    if (this.toolBatchOpen) return false
     if (this.notices.length === 0) return false
     let wake = false
     const current = this.notices.filter(notice => notice.session === this.sessionId)
@@ -813,12 +824,31 @@ ${text.trim()}`,
       content: images?.length ? [{ type: 'text', text: message }, ...images] : message,
       timestamp: Date.now()
     }
-    this.transcript.push(user)
-    this.persist()
+    // The window shows the message at once; where it may enter the transcript is a separate
+    // question, answered below.
     this.options.onEvent({ type: 'message_start', message: user })
     this.options.onEvent({ type: 'message_end', message: user })
+    if (this.toolBatchOpen) {
+      // The model already asked for tools whose results are still owed. Appending the steer right
+      // now would put a user turn between the calls and their results — the exact shape that makes
+      // DeepSeek/OpenAI answer `400 Messages with role 'tool' must be a response to a preceding
+      // message with 'tool_calls'`, and it would be persisted that way. Hold it until the batch is
+      // answered, which is also the order the model should read it in.
+      this.queuedSteers.push(user)
+    } else {
+      this.transcript.push(user)
+      this.persist()
+    }
     this.steerPending = true
     return { ok: true, disposition: 'started' }
+  }
+
+  /** Append the steers a tool batch held back, in the order the user sent them. */
+  private flushSteers(): void {
+    if (this.queuedSteers.length === 0) return
+    this.transcript.push(...this.queuedSteers)
+    this.queuedSteers = []
+    this.persist()
   }
 
   private async run(
@@ -866,12 +896,20 @@ ${text.trim()}`,
           if (this.notices.some((notice) => notice.session === this.sessionId && notice.wake)) continue
           break
         }
-        for (const call of calls) {
-          signal.throwIfAborted()
-          this.transcript.push(await this.runTool(call, tools))
-          this.persist()
-          // A tool result goes into the next prompt, so the context really did grow.
-          this.publishUsage(true)
+        this.toolBatchOpen = true
+        try {
+          for (const call of calls) {
+            signal.throwIfAborted()
+            this.transcript.push(await this.runTool(call, tools))
+            this.persist()
+            // A tool result goes into the next prompt, so the context really did grow.
+            this.publishUsage(true)
+          }
+        } finally {
+          // Results for every call are in (or the turn was aborted, which leaves the repair to
+          // `orderToolResults`); from here a steer may enter the transcript again.
+          this.toolBatchOpen = false
+          this.flushSteers()
         }
       }
       return { ok: true, disposition: 'started' }
@@ -885,6 +923,8 @@ ${text.trim()}`,
       }
       return { ok: false, error: text }
     } finally {
+      this.toolBatchOpen = false
+      this.flushSteers()
       const wake = this.drainNotices()
       // A steer that arrived after the loop decided to stop still has to be answered.
       const steered = this.steerPending
@@ -974,8 +1014,10 @@ ${text.trim()}`,
       {
         systemPrompt,
         // Keep the original provider metadata/signatures untouched. The same pi SDK adapters
-        // translate this copy into the target model's protocol at request time.
-        messages: structuredClone(this.transcript) as never,
+        // translate this copy into the target model's protocol at request time. The call/result
+        // grouping is repaired first: one user turn persisted inside a tool batch (an old steer, a
+        // notice) would otherwise make every request fail with 400 until the session is dropped.
+        messages: orderToolResults(structuredClone(this.transcript)) as never,
         tools: declarations
       },
       { ...fastOptions, signal,
