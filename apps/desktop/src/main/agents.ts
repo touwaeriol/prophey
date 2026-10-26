@@ -291,7 +291,7 @@ export function rankAgents(
  * why it would pay off, and models default to doing everything in the main context.
  */
 const SUBAGENT_USAGE = [
-  'Subagents run in their own pi process with their own context. They cannot see this conversation,',
+  'Subagents run in their own process with their own context. They cannot see this conversation,',
   'cannot ask the user, and cannot start more subagents. You get back a short final answer.',
   '',
   'Delegate when the work is self-contained and would otherwise flood this context:',

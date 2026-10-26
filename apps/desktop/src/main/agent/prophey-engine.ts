@@ -13,6 +13,7 @@ import type { TranscriptStore, StoredTranscript } from '../transcript-store'
 import { loadMcpTools } from './mcp-client'
 import { readProjectConventions } from './project-conventions'
 import { orderToolResults } from './transcript-order'
+import { toolGuidance } from './tool-guidance'
 import {
   bridgeContext,
   loadAskTool,
@@ -86,6 +87,11 @@ export class PropheyEngine implements AgentEngine {
       bashLogDirectory?: string
       allowedTools?: string[]
       appendSystemPrompt?: string
+      /**
+       * The app's subagent section (`agents.renderAgentsSection`), the same text pi receives through
+       * `AGENT_DESKTOP_AGENTS_SECTION`. Only used when the subagent tools are actually declared.
+       */
+      agentsSection?: () => string | undefined
       /** Where our own transcripts live; without it the conversation stays in memory. */
       transcripts?: TranscriptStore
       /** Current session id; the app allocates it. */
@@ -766,6 +772,9 @@ ${text.trim()}`,
       '越界（`..`、绝对路径、符号出根）会被拒绝；目录清单已在上方列出，不必再调用 workspace_roots。',
       '改文件前先读，改完再读回确认；命令用 run_bash 并指明目录。',
       '长命令会后台执行，输出写入日志。完成通知不包含完整输出；需要时用 read_bash_task 的游标增量读取，避免重复读取日志。任务需要命令结果时，应等待完成后再下结论。',
+      // MCP servers cannot bring a prompt of their own, so how to use each declared tool is spelled
+      // out here — gated on the tools this round really has.
+      toolGuidance({ tools: this.tools ?? [], agentsSection: this.options.agentsSection?.() }),
       this.conventions,
       this.options.appendSystemPrompt ?? ''
     ].filter(line => line !== '').join('\n')

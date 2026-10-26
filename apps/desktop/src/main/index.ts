@@ -489,6 +489,10 @@ function createEngine(record?: SessionRecord): AgentEngine {
         return port && token ? { url: `http://127.0.0.1:${port}`, token } : undefined
       },
       subagentModulePath: subagentConfig().enabled ? coreToolModule('subagent.mjs') : undefined,
+      // The same preset list pi receives through `AGENT_DESKTOP_AGENTS_SECTION`; the engine only
+      // injects it while `start_subagent` is actually declared.
+      agentsSection: () =>
+        subagentConfig().enabled ? agents.renderAgentsSection(agentSettings) : undefined,
       askModulePath: coreToolModule('ask-user.mjs'),
       mcpEndpoints: (workspace) => mcpEndpointsFor(workspace, slot.credential),
       speedMode: () => currentSpeedMode()
