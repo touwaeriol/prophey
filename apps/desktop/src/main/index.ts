@@ -2377,6 +2377,34 @@ function registerIpc(): void {
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   })
 
+  /**
+   * Rewrite history: cut the conversation back to the `index`-th user message, then send the edited
+   * text in its place. A running turn is stopped first — everything after the edited message is on
+   * its way out anyway, so waiting for it would only make the user click twice.
+   */
+  handle(
+    'pi:edit-turn',
+    async (
+      _event,
+      index: number,
+      message: string,
+      images?: PromptImage[],
+      sessionKey?: string
+    ) => {
+      try {
+        const owner = await promptEngineForSession(sessionKey)
+        if (!owner.rewind) return { ok: false, error: '当前引擎不支持改写历史' }
+        if (owner.busy()) {
+          await owner.abort()
+          if (!(await owner.waitForIdle(30_000))) return { ok: false, error: '当前回合停不下来，稍后再试' }
+        }
+        const rewound = await owner.rewind(index)
+        if (!rewound.ok) return { ok: false, error: rewound.error ?? '改写失败' }
+        return await submitPrompt(message, undefined, images, owner)
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+    }
+  )
+
   handle('pi:abort', async () => {
     cancelPendingAsks('用户中止了本次运行')
     // A subagent that settles right after a manual stop must not start a new turn behind the

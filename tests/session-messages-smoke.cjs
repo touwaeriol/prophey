@@ -21,8 +21,28 @@ module.exports = async function sessionMessagesSmoke(evaluate, until, window, se
   setSessionFixture({ sessionKey: key, messages: message('OWN_SESSION_SENTINEL') })
   await until(() => shown('OWN_SESSION_SENTINEL'))
 
+  // Rewriting history: a settled user bubble offers the entry point, and the editor is explicit
+  // about what it costs.
+  assert.equal(
+    await evaluate('!!document.querySelector(".message.user .user-edit-open")'),
+    true,
+    'a settled user message can be edited'
+  )
+  await evaluate('document.querySelector(".user-edit-open").click()')
+  await until(() => evaluate('!!document.querySelector(".user-edit-input")'), 'editor opens')
+  assert.equal(
+    await evaluate('document.querySelector(".user-edit-hint").textContent.trim()'),
+    '发送后，这条之后的对话会被丢弃'
+  )
+  assert.equal(await evaluate('document.querySelector(".user-edit-input").value'), 'OWN_SESSION_SENTINEL')
+  await evaluate(`(() => {
+    const area = document.querySelector('.user-edit-input')
+    area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  })()`)
+  await until(() => evaluate('!document.querySelector(".user-edit-input")'), 'escape cancels the edit')
+
   setSessionFixture(undefined)
   window.webContents.send('pi:status', idle)
   await until(async () => !(await shown('OWN_SESSION_SENTINEL')))
-  console.log('Session messages passed: foreign transcripts are ignored, the own one arrives')
+  console.log('Session messages passed: foreign transcripts are ignored, the own one arrives, and a user message can be rewritten')
 }

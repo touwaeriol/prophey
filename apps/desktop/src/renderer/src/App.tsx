@@ -48,7 +48,7 @@ import {
 } from './lib/session-composer'
 import { PANEL_OPEN_KEY, SIDEBAR_OPEN_KEY, SIDEBAR_WIDTH_KEY, readLayoutFlag, readLayoutNumber, writeLayoutFlag, writeLayoutNumber } from './lib/layout-prefs'
 import { updateStatusText } from './lib/updates'
-import { toChatItems, type ChatItem } from './lib/messages'
+import { toChatItems, type ChatItem, type MessageImage } from './lib/messages'
 import { videoFramePrompt } from './lib/video'
 import { messagesBelong } from './lib/session-messages'
 import {
@@ -1061,6 +1061,43 @@ export default function App(): React.JSX.Element {
     [dropPendingSend]
   )
 
+  /**
+   * Rewrite history: the edited message replaces its old self and everything after it is gone.
+   *
+   * The transcript is cut here first so the window shows the new shape immediately; a failure puts
+   * it back by re-reading the engine's own transcript (which still has the old turns).
+   */
+  const editTurn = useCallback(
+    async (index: number, text: string, images?: MessageImage[]): Promise<void> => {
+      const owner = activeComposerKey
+      if (statusRef.current.switchingEngine || owner !== composerKeyRef.current) return
+      setStick(true)
+      setPendingSends((prev) => prev.filter((entry) => entry.key !== owner))
+      setItems((prev) => {
+        let seen = -1
+        const at = prev.findIndex((item) => {
+          if (item.role !== 'user' || item.pending) return false
+          seen += 1
+          return seen === index
+        })
+        return at < 0 ? prev : prev.slice(0, at)
+      })
+      const result = await window.pi
+        .editTurn(
+          index,
+          text,
+          (images ?? []).map((image) => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType })),
+          owner
+        )
+        .catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+      if (result.ok) return
+      if (owner === composerKeyRef.current) setToast(result.error ?? '改写失败')
+      // Whatever happened, the engine's transcript is the truth; the window follows it.
+      await loadMessages()
+    },
+    [activeComposerKey, loadMessages]
+  )
+
   /** Runs a desktop slash command; returns true when the text was consumed. */
 
   /**
@@ -1616,6 +1653,7 @@ export default function App(): React.JSX.Element {
                   loggedIn={Boolean(status.model)}
                   subagents={subagents}
                   onOpenSubagent={openSubagents}
+                  onEditTurn={(index, text, images) => void editTurn(index, text, images)}
                   onSuggestion={(text) => {
                     setDraft(text)
                     requestAnimationFrame(() => {

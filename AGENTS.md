@@ -152,6 +152,17 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - 回合结束后自动按顺序发送队列里的下一条。**flush 的 effect 只能依赖 `status.isStreaming` / `status.compacting` / `status.phase`，不能依赖 `queued`**——否则加入第二条时会和第一条抢跑（`isStreaming` 还没变 true 就再发一次），实测第二条会被 pi 拒绝并丢失。
 - 发送失败时把该条放回队首并提示，避免静默丢消息。放回后必须**自己再排一次**（`restore()` 重新读 `pi:get-status` 并 2 秒后 `setQueueTick`）：条目出队又回队不产生任何状态变化，flush 不会重跑，否则排队项会永远躺在那里。
 
+## 改写历史（编辑旧消息并重发）
+
+- 入口：用户气泡 hover 时右上角的「编辑」（`.user-edit-open`，`Conversation.tsx` 的 `UserMessage`）。点开变成 `.user-edit` 输入框，`Enter` 发送 / `Shift+Enter` 换行（和输入框同一套手感）/ `Esc` 取消；提示文字就是代价——「发送后，这条之后的对话会被丢弃」。**不弹二次确认**（用户明确要求：直接截断重发）。
+- 语义就是「从这条重发」：该用户消息之后的 transcript 全部丢弃，改后的文本接在它原来的位置发送。图片保持不变（编辑改的是文字，不是附件）。
+- **索引是「第几条用户消息」**，不是数组下标：渲染层 `Conversation` 在 map 时数 `role === 'user'` 且 `!pending` 的条目得到 `userIndex`（未收尾的气泡给 `-1`，不给编辑入口），主进程再把这个序号交给引擎。引擎侧自己数自己的 user turn，两边只约定「按顺序数用户消息」这一件事，不靠 id 对齐。
+- **IPC `pi:edit-turn`**：引擎支持就先 `abort()` + `waitForIdle()`（用户在跑着的时候点编辑，不用先手动停），然后 `rewind(index)`，成功后再走唯一的发送入口 `submitPrompt()`。渲染层**先本地切掉**那条及其之后的消息（立刻看到新形状），失败时 `loadMessages()` 以引擎的 transcript 为准恢复。
+- 引擎实现：
+  - **Prophey**：`rewind(index)` = `userTurnOffset(index)` 定位后 `slice` 截断 + `persist()` 整份重写；同时清掉还挂着的 `queuedSteers`（它们属于一个已经不复存在的回合）和 usage 缓存。会话文件里旧内容真的没了。
+  - **pi**：会话是 append-only 树，原生回退就是 `fork`：`get_fork_messages` 拿到有序的 `{entryId}`，`fork({entryId})` 把叶节点挪到它的父节点并**开一个新会话文件**（`get_state` 回来后 `setStatus({sessionFile})`，窗口跟着换）。旧分支在 pi 自己的树里还在，但侧边栏会把它当新会话——这是 pi 的语义，不要假装能就地删。
+  - **Claude Code / Codex**：`rewind` 不存在（会话在厂商手里），`pi:edit-turn` 直接回「当前引擎不支持改写历史」，入口不隐藏——点了给个交代好过默默消失。
+
 ## bash 工具（Windows）
 
 - pi 的 bash 工具用 `where bash.exe` 找 shell：先 `%ProgramFiles%\Git\bin\bash.exe`，再 PATH 里的第一个。**Git 装在别处（按用户安装、`D:\app\Git`）时，PATH 里的第一个是 `%LOCALAPPDATA%\Microsoft\WindowsApps\bash.exe`——那是 WSL 的 App Execution Alias，没装发行版时它永远不返回**。表现是每条 bash 都 `Command timed out after N seconds`，连 `echo hi` 也一样，从记录里完全看不出 shell 根本没启动。

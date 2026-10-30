@@ -885,6 +885,38 @@ ${text.trim()}`,
     return { ok: true }
   }
 
+  /**
+   * Cut the conversation back to the `index`-th user message, so an edited one can replace it.
+   *
+   * The engine owns the transcript here, so this is a plain cut plus a rewrite of the stored file:
+   * the turns after the edited message are gone, which is what "rewrite this message" means. A steer
+   * still waiting is dropped too — it was written for a turn that no longer exists.
+   */
+  async rewind(index: number): Promise<{ ok: boolean; removed?: number; error?: string }> {
+    if (this.busy()) return { ok: false, error: '先停掉当前回合' }
+    const at = this.userTurnOffset(index)
+    if (at < 0) return { ok: false, error: '找不到这条消息' }
+    const removed = this.transcript.length - at
+    this.transcript = this.transcript.slice(0, at)
+    this.queuedSteers = []
+    this.steerPending = false
+    this.usage = undefined
+    this.live = undefined
+    this.persist()
+    return { ok: true, removed }
+  }
+
+  /** Position of the `index`-th user turn in the transcript, or -1 when there is no such turn. */
+  private userTurnOffset(index: number): number {
+    let seen = -1
+    for (let at = 0; at < this.transcript.length; at += 1) {
+      if (this.transcript[at].role !== 'user') continue
+      seen += 1
+      if (seen === index) return at
+    }
+    return -1
+  }
+
   /** Append the steers a tool batch held back, in the order the user sent them. */
   private flushSteers(): void {
     if (this.queuedSteers.length === 0) return

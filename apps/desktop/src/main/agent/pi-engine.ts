@@ -489,6 +489,31 @@ export class PiEngine implements AgentEngine {
     await this.request('prompt', { message }, 30_000)
   }
 
+  /**
+   * pi's own rewind is `fork`: the session is an append-only tree, so the branch after the edited
+   * message stays on disk while the window continues from the forked one.
+   */
+  async rewind(index: number): Promise<{ ok: boolean; removed?: number; error?: string }> {
+    const listed = await this.request<{ data?: { messages?: Array<{ entryId?: string }> } }>(
+      'get_fork_messages',
+      {},
+      10_000
+    )
+    const messages = listed.data?.messages ?? []
+    const target = messages[index]
+    if (!target?.entryId) return { ok: false, error: '找不到这条消息' }
+    const forked = await this.request<{ data?: { cancelled?: boolean } }>(
+      'fork',
+      { entryId: target.entryId },
+      20_000
+    )
+    if (forked.data?.cancelled) return { ok: false, error: '改写被扩展取消了' }
+    // A fork is a new session file; the window has to follow it or it would keep showing the old one.
+    const state = await this.request<{ data?: Record<string, unknown> }>('get_state', {}, 5000)
+    if (typeof state.data?.sessionFile === 'string') this.setStatus({ sessionFile: state.data.sessionFile })
+    return { ok: true, removed: messages.length - index }
+  }
+
   private handleRecord(record: Record<string, unknown>): void {
     if (
       record.type === 'extension_ui_request' &&

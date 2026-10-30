@@ -76,6 +76,14 @@ export interface AgentEngine {
   /** Send one message with no queueing or retry logic (used for the `/btw` fork). */
   send(message: string): Promise<void>
   /**
+   * Drop every turn from the `index`-th user message on, so an edited message can be sent in its
+   * place. `index` counts user turns, oldest first — the same order `messages()` lists them.
+   *
+   * Optional on purpose: an engine that hands its history to a vendor session (Claude Code, Codex)
+   * has no way back, and the window then says so instead of pretending.
+   */
+  rewind?(index: number): Promise<{ ok: boolean; removed?: number; error?: string }>
+  /**
    * Take back a steer this engine is still holding, before it reached the transcript.
    *
    * Optional on purpose: an engine that hands the message straight to its own agent (pi) cannot

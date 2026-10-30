@@ -502,6 +502,26 @@ test('Prophey: Enter mid-run steers into the running turn instead of queueing', 
   engine.isBusy = false
 })
 
+test('Prophey: rewriting a message cuts the transcript at that turn', async () => {
+  const { PropheyEngine } = require(path.join(temp, 'prophey-engine.cjs'))
+  const engine = new PropheyEngine(callbacks())
+  engine.setStatus({ phase: 'ready' })
+  engine.transcript = [
+    { role: 'user', content: 'first' },
+    { role: 'assistant', content: [{ type: 'text', text: 'one' }] },
+    { role: 'user', content: 'second' },
+    { role: 'assistant', content: [{ type: 'text', text: 'two' }] }
+  ]
+  // Index counts user turns, so 1 is 'second' and everything from it is dropped.
+  assert.deepEqual(await engine.rewind(1), { ok: true, removed: 2 })
+  assert.deepEqual((await engine.messages()).map((message) => message.role), ['user', 'assistant'])
+  assert.equal((await engine.messages())[0].content, 'first')
+  assert.equal((await engine.rewind(9)).ok, false, 'there is no such turn')
+  engine.isBusy = true
+  assert.match((await engine.rewind(0)).error, /先停掉当前回合/)
+  engine.isBusy = false
+})
+
 test('Prophey: a steer waits for the tool batch and can be taken back before it goes in', async () => {
   const { PropheyEngine } = require(path.join(temp, 'prophey-engine.cjs'))
   const events = []

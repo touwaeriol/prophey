@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { SubagentView } from '@shared/types'
-import type { ChatItem, ToolCallView } from '../lib/messages'
+import type { ChatItem, MessageImage, ToolCallView } from '../lib/messages'
 import { Markdown } from './Markdown'
 import { MessageImages } from './ImageLightbox'
-import { ChevronIcon, SparkIcon, ToolIcon } from './Icons'
+import { ChevronIcon, PencilIcon, SparkIcon, ToolIcon } from './Icons'
 import { SUBAGENT_STATUS_LABELS, isSubagentRunning } from '../lib/subagents'
 import { usageMeter } from '../lib/context-usage'
 
@@ -180,10 +180,15 @@ function Thinking({ text }: { text: string }) {
 
 function Message({
   item,
+  userIndex,
+  onEditTurn,
   subagents,
   onOpenSubagent
 }: {
   item: ChatItem
+  /** Position among user turns, or -1 for a bubble that is not a settled user message. */
+  userIndex: number
+  onEditTurn: (index: number, text: string, images?: MessageImage[]) => void
   subagents: SubagentView[]
   onOpenSubagent: (id?: string) => void
 }) {
@@ -198,17 +203,7 @@ function Message({
     )
   }
   if (item.role === 'user') {
-    return (
-      <article
-        className={`message user ${item.pending ? 'pending' : ''}`}
-        data-message-id={item.id}
-      >
-        {item.images && item.images.length > 0 && (
-          <MessageImages images={item.images} align="end" />
-        )}
-        {item.text && <UserBubble text={item.text} />}
-      </article>
-    )
+    return <UserMessage item={item} index={userIndex} onEditTurn={onEditTurn} />
   }
   const starts = item.toolCalls.filter((call) => isSubagentStart(call.name))
   const others = item.toolCalls.filter((call) => !isSubagentStart(call.name))
@@ -305,6 +300,87 @@ function UserBubble({ text }: { text: string }) {
   )
 }
 
+/**
+ * One of the user's own messages, with the edit affordance.
+ *
+ * Editing rewrites history: the engine drops everything from this turn on and the edited text is
+ * sent in its place, so the editor says so out loud. Images stay attached — an edit changes the
+ * words, not what was attached to them.
+ */
+function UserMessage({
+  item,
+  index,
+  onEditTurn
+}: {
+  item: ChatItem
+  index: number
+  onEditTurn: (index: number, text: string, images?: MessageImage[]) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const editing = draft !== null
+  // A bubble that has not settled (still being delivered) is not in the engine's history yet.
+  const editable = index >= 0 && !item.pending
+  const canSend = draft !== null && (draft.trim().length > 0 || (item.images?.length ?? 0) > 0)
+
+  const submit = (): void => {
+    if (!canSend) return
+    const text = draft.trim()
+    setDraft(null)
+    onEditTurn(index, text, item.images)
+  }
+
+  return (
+    <article className={`message user ${item.pending ? 'pending' : ''}`} data-message-id={item.id}>
+      {item.images && item.images.length > 0 && (
+        <MessageImages images={item.images} align="end" />
+      )}
+      {editing ? (
+        <div className="user-edit">
+          <textarea
+            className="user-edit-input"
+            value={draft}
+            rows={Math.min(8, Math.max(2, draft.split('\n').length))}
+            autoFocus
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setDraft(null)
+                return
+              }
+              // Enter sends, Shift+Enter breaks the line — the composer's own contract.
+              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+              event.preventDefault()
+              submit()
+            }}
+          />
+          <div className="user-edit-actions">
+            <span className="user-edit-hint">发送后，这条之后的对话会被丢弃</span>
+            <button className="user-edit-btn ghost" onClick={() => setDraft(null)}>
+              取消
+            </button>
+            <button className="user-edit-btn primary" disabled={!canSend} onClick={submit}>
+              重新发送
+            </button>
+          </div>
+        </div>
+      ) : (
+        item.text && <UserBubble text={item.text} />
+      )}
+      {editable && !editing && (
+        <button
+          className="user-edit-open"
+          title="编辑这条并从它重新发送（后面的对话会被丢弃）"
+          onClick={() => setDraft(item.text)}
+        >
+          <PencilIcon size={11} />
+          编辑
+        </button>
+      )}
+    </article>
+  )
+}
+
 export function Conversation({
   items,
   workspace,
@@ -312,7 +388,8 @@ export function Conversation({
   loggedIn,
   subagents,
   onOpenSubagent,
-  onSuggestion
+  onSuggestion,
+  onEditTurn
 }: {
   items: ChatItem[]
   workspace: string
@@ -321,6 +398,8 @@ export function Conversation({
   subagents: SubagentView[]
   onOpenSubagent: (id?: string) => void
   onSuggestion: (text: string) => void
+  /** Rewrite history from the `index`-th user message and send it again. */
+  onEditTurn: (index: number, text: string, images?: MessageImage[]) => void
 }) {
   if (items.length === 0) {
     return (
@@ -345,11 +424,24 @@ export function Conversation({
     )
   }
 
+  // The engine counts user turns, so each bubble has to know its own position among them. A pending
+  // bubble is not in the engine's history yet and gets -1 (no edit affordance).
+  let userTurns = -1
   return (
     <div className="conversation">
-      {items.map((item) => (
-        <Message key={item.id} item={item} subagents={subagents} onOpenSubagent={onOpenSubagent} />
-      ))}
+      {items.map((item) => {
+        if (item.role === 'user' && !item.pending) userTurns += 1
+        return (
+          <Message
+            key={item.id}
+            item={item}
+            userIndex={item.role === 'user' && !item.pending ? userTurns : -1}
+            onEditTurn={onEditTurn}
+            subagents={subagents}
+            onOpenSubagent={onOpenSubagent}
+          />
+        )
+      })}
     </div>
   )
 }

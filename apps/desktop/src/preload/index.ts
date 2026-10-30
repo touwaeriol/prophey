@@ -71,6 +71,8 @@ const bridge: PiBridge = {
     ipcRenderer.invoke('pi:send-now', message, images, sessionKey, steerId),
   cancelSteer: (steerId: string, sessionKey?: string) =>
     ipcRenderer.invoke('pi:cancel-steer', steerId, sessionKey),
+  editTurn: (index: number, message: string, images?: PromptImage[], sessionKey?: string) =>
+    ipcRenderer.invoke('pi:edit-turn', index, message, images, sessionKey),
   abort: () => ipcRenderer.invoke('pi:abort') as Promise<void>,
   newSession: (options) => ipcRenderer.invoke('pi:new-session', options),
   switchSession: (sessionPath: string) => ipcRenderer.invoke('pi:switch-session', sessionPath),

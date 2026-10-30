@@ -1330,6 +1330,103 @@ body.resizing-sidebar * {
   opacity: 0.62;
 }
 
+/*
+ * Editing an earlier message rewrites history: everything after it is dropped, so the editor is a
+ * real input (with the composer's Enter/Shift+Enter contract) and the hint says what it costs.
+ */
+.message.user {
+  position: relative;
+}
+
+.user-edit-open {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elev);
+  color: var(--faint);
+  font-size: 10.2px;
+  line-height: 1.6;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.message.user:hover .user-edit-open,
+.user-edit-open:focus-visible {
+  opacity: 1;
+}
+
+.user-edit-open:hover {
+  border-color: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.user-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(680px, 78vw);
+  padding: 7px 9px;
+  border-radius: 13px 13px 3px 13px;
+  border: 1px solid var(--accent-soft);
+  background: var(--bg-input);
+}
+
+.user-edit-input {
+  width: 100%;
+  min-height: 2.6em;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.6px;
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.user-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.user-edit-hint {
+  margin-right: auto;
+  color: var(--faint);
+  font-size: 10.2px;
+}
+
+.user-edit-btn {
+  padding: 1px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 10.4px;
+  line-height: 1.7;
+}
+
+.user-edit-btn.primary {
+  border-color: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.user-edit-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.user-edit-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
 .assistant-avatar {
   flex: 0 0 22px;
   width: 22px;

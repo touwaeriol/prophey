@@ -700,6 +700,16 @@ export interface PiBridge {
   ): Promise<PromptResult>;
   /** Take back a steer that is still waiting; fails once it has been handed to the transcript. */
   cancelSteer(steerId: string, sessionKey?: string): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Rewrite history: drop every turn from the `index`-th user message on, then send `message` in its
+   * place. `index` counts user messages in the transcript, oldest first.
+   */
+  editTurn(
+    index: number,
+    message: string,
+    images?: PromptImage[],
+    sessionKey?: string,
+  ): Promise<PromptResult>;
   abort(): Promise<void>;
   newSession(options?: SessionSwitchOptions): Promise<SwitchResult>;
   switchSession(sessionPath: string): Promise<SwitchResult>;
