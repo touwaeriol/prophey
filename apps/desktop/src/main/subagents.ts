@@ -16,6 +16,7 @@ import { PiRpcClient } from './pi-rpc'
 import { withRealBash } from './shell'
 import type { AgentMode, AgentPreset } from './agents'
 import type { AgentEngine } from './agent/engine'
+import type { ContextUsage, PiStatus } from '@shared/types'
 
 export type SubagentStatus = 'starting' | 'idle' | 'streaming' | 'error' | 'stopped'
 
@@ -81,6 +82,14 @@ export interface SubagentRecord {
   activeCalls: SubagentActiveCall[]
   finalText?: string
   tokens?: number
+  /**
+   * How full the subagent's own request is (the same meter the session ring shows).
+   *
+   * A subagent burns its own context, and a background run that fills it up produces a worse answer
+   * or compacts behind the user's back, so the panel has to show it. Prophey publishes it from its
+   * status while the turn streams; pi is asked at the turn boundaries.
+   */
+  contextUsage?: ContextUsage
   runtimeMs?: number
   timeoutMs: number
   notify: NotifyMode
@@ -129,6 +138,8 @@ const IDLE_TIMEOUT_MS = 30 * 60 * 1000
 const READY_TIMEOUT_MS = 30_000
 const MAX_KEPT = 120
 const STORE_VERSION = 1
+/** pi is polled for context usage at most this often, on assistant-message boundaries. */
+const USAGE_POLL_MS = 2500
 /** Streaming deltas are coalesced to about eight updates a second before they reach the window. */
 const PROGRESS_EMIT_MS = 120
 
@@ -155,6 +166,8 @@ interface Internal {
   /** Incremented per turn, so one settle is reported once even though two events fire. */
   runId: number
   notifiedRun: number
+  /** Last time pi was asked for its meter; it has no status stream of its own. */
+  lastUsageAt: number
 }
 
 export class SubagentManager {
@@ -175,6 +188,8 @@ export class SubagentManager {
       createOwnEngine?: (options: {
         id: string; tools?: string[]; appendSystemPrompt?: string
         onEvent: (event: Record<string, unknown>) => void
+        /** The own engine's state, so its context meter can follow the turn. */
+        onStatus?: (status: PiStatus) => void
       }) => AgentEngine
     }
   ) {
@@ -222,7 +237,8 @@ export class SubagentManager {
         settled: true,
         lastProgressAt: 0,
         runId: 0,
-        notifiedRun: 0
+        notifiedRun: 0,
+        lastUsageAt: 0
       })
     }
     this.prune()
@@ -362,7 +378,8 @@ export class SubagentManager {
       settled: false,
       lastProgressAt: 0,
       runId: 0,
-      notifiedRun: 0
+      notifiedRun: 0,
+      lastUsageAt: 0
     }
     this.items.set(id, internal)
     this.prune()
@@ -371,7 +388,8 @@ export class SubagentManager {
       try {
         const own = this.options.createOwnEngine!({
           id, tools, appendSystemPrompt: preset?.appendSystemPrompt,
-          onEvent: (event) => this.onEvent(internal, event)
+          onEvent: (event) => this.onEvent(internal, event),
+          onStatus: (status) => this.onStatus(internal, status)
         })
         internal.own = own
         await own.start({ primary: cwd, additional: options.additional ?? [] }, { model })
@@ -494,6 +512,58 @@ export class SubagentManager {
     this.finish(internal)
   }
 
+  /**
+   * Keep the record's meter in step with a status the subagent's own engine published.
+   *
+   * Prophey publishes while the round streams, which is why the ring moves before the turn
+   * settles; the value is only emitted when it changed, so a status that merely moved the phase
+   * does not repaint the drawer.
+   */
+  private onStatus(internal: Internal, status: PiStatus): void {
+    if (!this.recordUsage(internal, status.contextUsage)) return
+    this.emit(internal.record)
+  }
+
+  /** pi has no status stream: ask for its meter at the turn boundaries, at most every 2.5s. */
+  private refreshUsage(internal: Internal): void {
+    const rpc = internal.rpc
+    if (!rpc) return
+    const now = Date.now()
+    if (now - internal.lastUsageAt < USAGE_POLL_MS) return
+    internal.lastUsageAt = now
+    void rpc
+      .request<{ data?: { contextUsage?: ContextUsage } }>('get_session_stats', {}, 5000)
+      .then((response) => {
+        if (this.recordUsage(internal, response.data?.contextUsage)) this.emit(internal.record)
+      })
+      .catch(() => {
+        // The meter is best effort; a refused request must not fail the run.
+      })
+  }
+
+  /** Store a usage snapshot, reporting whether anything the panel shows actually changed. */
+  private recordUsage(internal: Internal, usage: ContextUsage | undefined): boolean {
+    if (!usage) return false
+    const record = internal.record
+    const last = record.contextUsage
+    const next: ContextUsage = {
+      tokens: usage.tokens,
+      contextWindow: usage.contextWindow,
+      percent: usage.percent,
+      ...(usage.breakdown ? { breakdown: usage.breakdown } : {})
+    }
+    if (
+      last &&
+      last.tokens === next.tokens &&
+      last.contextWindow === next.contextWindow &&
+      last.percent === next.percent
+    ) {
+      return false
+    }
+    record.contextUsage = next
+    return true
+  }
+
   private onEvent(internal: Internal, event: Record<string, unknown>): void {
     const record = internal.record
     switch (event.type) {
@@ -505,6 +575,7 @@ export class SubagentManager {
         record.activeCalls = []
         this.clearProgress(internal)
         this.emit(record)
+        this.refreshUsage(internal)
         return
       case 'message_start': {
         const message = event.message as Record<string, unknown> | undefined
@@ -587,6 +658,7 @@ export class SubagentManager {
         }
         this.clearProgress(internal)
         this.emit(record)
+        this.refreshUsage(internal)
         return
       }
       default:
@@ -633,13 +705,16 @@ export class SubagentManager {
       // transcript is best effort
     }
     try {
-      const stats = own ? { data: await own.stats() } : await rpc!.request<{ data?: { tokens?: { total?: number } } }>(
-        'get_session_stats',
-        {},
-        5000
-      )
+      const stats = own
+        ? { data: await own.stats() as { tokens?: { total?: number }; contextUsage?: ContextUsage } }
+        : await rpc!.request<{ data?: { tokens?: { total?: number }; contextUsage?: ContextUsage } }>(
+          'get_session_stats',
+          {},
+          5000
+        )
       const total = stats.data?.tokens?.total
       if (typeof total === 'number') record.tokens = total
+      this.recordUsage(internal, stats.data?.contextUsage)
     } catch {
       // stats are optional
     }

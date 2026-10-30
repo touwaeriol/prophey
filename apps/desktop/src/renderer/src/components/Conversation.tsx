@@ -5,6 +5,7 @@ import { Markdown } from './Markdown'
 import { MessageImages } from './ImageLightbox'
 import { ChevronIcon, SparkIcon, ToolIcon } from './Icons'
 import { SUBAGENT_STATUS_LABELS, isSubagentRunning } from '../lib/subagents'
+import { usageMeter } from '../lib/context-usage'
 
 /** The desktop tool that starts a run: these get a card of their own instead of a generic row. */
 function isSubagentStart(name: string): boolean {
@@ -119,6 +120,11 @@ function SubagentCard({
         <span className={`subagent-card-state ${status}`}>{SUBAGENT_STATUS_LABELS[status]}</span>
         {id && <span className="subagent-card-id">{id}</span>}
         <span className="subagent-card-spacer" />
+        {record?.contextUsage && (
+          <span className="subagent-card-meta" title="子代理自己的上下文">
+            {usageMeter(record.contextUsage)}
+          </span>
+        )}
         {record?.runtimeMs !== undefined && (
           <span className="subagent-card-meta">{formatDuration(record.runtimeMs)}</span>
         )}

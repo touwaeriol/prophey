@@ -118,6 +118,7 @@ The main agent can start subagents — separate `pi` processes that work on a ta
 - Four presets ship built in (`explorer`, `reviewer`, `tester`, `worker`) and are stored in `%APPDATA%/agent-desktop/agents.json`; every preset field can be overridden per call.
 - Presets are either listed in the system prompt (`agents.exposure: "prompt"`), found through `search_agents` (`"lazy"`), or not mentioned at all (`"hidden"`). There is no loading step: a preset id works as soon as the model knows it.
 - Subagents run with `--no-mcp`: they cannot ask the user questions or start further subagents.
+- A subagent burns a context window of its own. The drawer, the transcript card and `get_subagent` report how full it is (`3% 34K / 1M`): live while a Prophey run streams, and at each turn boundary for a pi one. A background run that fills up compacts behind your back or starts answering worse, so that number is the first sign something needs splitting up.
 
 Every built-in tool can be switched off individually in Settings → MCP; a disabled tool is registered as `hidden`, so the model never sees it. The CodeGraph index (`.codegraph/`) is built automatically when a project has none — re-indexing stays a manual action, because the running server holds the index lock.
 

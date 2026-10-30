@@ -4,6 +4,7 @@ import { engineLabel } from '@shared/engine'
 import { ChevronIcon, RefreshIcon, SparkIcon, StopIcon, ToolIcon } from './Icons'
 import { Markdown } from './Markdown'
 import { SUBAGENT_STATUS_LABELS, isSubagentRunning } from '../lib/subagents'
+import { contextLabel, usageMeter, usagePair, usageTone } from '../lib/context-usage'
 
 function span(ms: number | undefined): string {
   if (typeof ms !== 'number') return ''
@@ -12,9 +13,37 @@ function span(ms: number | undefined): string {
   return `${Math.floor(ms / 60_000)}m${Math.round((ms % 60_000) / 1000)}s`
 }
 
-function tokenLabel(count: number | undefined): string {
-  if (typeof count !== 'number') return ''
-  return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count)
+/** One row's second line: state, mode, engine, runtime and the run's own context meter. */
+function rowStats(record: SubagentView): string {
+  return [
+    SUBAGENT_STATUS_LABELS[record.status],
+    record.mode === 'background' ? '后台' : '同步',
+    engineLabel(record.engine ?? 'pi'),
+    span(record.runtimeMs),
+    usageMeter(record.contextUsage) ||
+      (contextLabel(record.tokens) ? `${contextLabel(record.tokens)} tokens` : '')
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** The run's meter, drawn like the session one so both read as the same number. */
+function ContextMeter({ usage }: { usage: SubagentView['contextUsage'] }) {
+  if (!usage) return null
+  const percent = typeof usage.percent === 'number' ? Math.round(usage.percent) : undefined
+  return (
+    <div
+      className={`context-meter subagent-meter ${usageTone(usage)}`}
+      title={`子代理自己的上下文：${usagePair(usage.tokens, usage.contextWindow)}`}
+    >
+      <span
+        className="context-ring"
+        style={{ ['--p' as string]: `${percent ?? 0}%` }}
+      />
+      <span className="context-meter-value">{percent === undefined ? '—' : `${percent}%`}</span>
+      <span className="context-meter-sub">{usagePair(usage.tokens, usage.contextWindow)}</span>
+    </div>
+  )
 }
 
 function changedFiles(record: SubagentView): string[] {
@@ -225,13 +254,7 @@ export function SubagentsDrawer({
                     {record.label && <span className="subagent-row-id">{record.id}</span>}
                     {record.restored && <span className="subagent-tag">历史</span>}
                   </span>
-                  <span className="subagent-row-sub">
-                    {SUBAGENT_STATUS_LABELS[record.status]}
-                    {record.mode === 'background' ? ' · 后台' : ' · 同步'}
-                    {' · ' + engineLabel(record.engine ?? 'pi')}
-                    {span(record.runtimeMs) ? ` · ${span(record.runtimeMs)}` : ''}
-                    {tokenLabel(record.tokens) ? ` · ${tokenLabel(record.tokens)} tokens` : ''}
-                  </span>
+                  <span className="subagent-row-sub">{rowStats(record)}</span>
                 </span>
               </button>
             ))}
@@ -264,6 +287,8 @@ export function SubagentsDrawer({
           <div className="subagent-cwd" title={selected.cwd}>
             {selected.cwd}
           </div>
+
+          <ContextMeter usage={selected.contextUsage} />
 
           {selected.sessionFile && (
             <div className="subagent-session">

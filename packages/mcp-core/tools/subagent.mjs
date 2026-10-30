@@ -48,6 +48,24 @@ function contextLabel(window) {
   return `${Math.round(window / 1000)}K`
 }
 
+/**
+ * The subagent's own meter, the same one the panel shows: percent of its window, used / window.
+ *
+ * A subagent burns a context of its own; when that fills up its answer gets worse or it compacts
+ * on its own, so the parent should be able to see it before it starts a sibling.
+ */
+function usageLabel(record) {
+  const usage = record?.contextUsage
+  if (!usage) return ''
+  const percent =
+    typeof usage.percent === 'number' ? `${Math.round(usage.percent)}%` : ''
+  const used = contextLabel(usage.tokens)
+  const window = contextLabel(usage.contextWindow)
+  const pair = used && window ? `${used}/${window}` : ''
+  if (!percent && !pair) return ''
+  return `上下文 ${[percent, pair].filter(Boolean).join(' ')}`
+}
+
 const STATUS_LABEL = {
   starting: 'starting',
   idle: 'idle',
@@ -65,7 +83,7 @@ function statusLine(record) {
     record.mode ? `· ${record.mode}` : '',
     record.model ? `· ${record.model.provider}/${record.model.id}` : '',
     duration(record.runtimeMs) ? `· ${duration(record.runtimeMs)}` : '',
-    tokens(record.tokens) ? `· ${tokens(record.tokens)}` : '',
+    usageLabel(record) ? `· ${usageLabel(record)}` : tokens(record.tokens) ? `· ${tokens(record.tokens)}` : '',
     record.restored ? '· 历史' : ''
   ]
   return parts.filter(Boolean).join(' ')

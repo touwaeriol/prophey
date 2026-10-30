@@ -17,19 +17,11 @@ import {
 } from './Icons'
 import { DraftImageStrip, ImageLightbox } from './ImageLightbox'
 import { insertFileMention } from '../lib/composer'
+import { contextLabel } from '../lib/context-usage'
 import { useDismissable } from '../hooks/useDismissable'
 import type { QueuedMessage } from '../lib/chat-types'
 import { blobToDraftImage, clipboardImages, imageSrc, type DraftImage } from '../lib/images'
 import { extractVideoFrames, isVideo } from '../lib/video'
-
-function contextLabel(value?: number): string {
-  if (!value) return ''
-  if (value >= 1_000_000) {
-    const millions = value / 1_000_000
-    return `${Number(millions.toFixed(2))}M`
-  }
-  return `${Math.round(value / 1000)}K`
-}
 
 const THINKING_LABELS: Record<string, string> = {
   off: '关闭',

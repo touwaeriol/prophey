@@ -45,8 +45,8 @@ function managerWithOwnWorker(notices = []) {
   const manager = new SubagentManager({
     userData: path.join(temp, 'data-' + managers.length),
     onSettle: record => notices.push(record.id),
-    createOwnEngine: ({ tools, appendSystemPrompt, onEvent }) => new PropheyEngine({
-      onStatus() {}, onEvent, onSettled() {}, allowedTools: tools, appendSystemPrompt,
+    createOwnEngine: ({ tools, appendSystemPrompt, onEvent, onStatus }) => new PropheyEngine({
+      onStatus: onStatus ?? (() => {}), onEvent, onSettled() {}, allowedTools: tools, appendSystemPrompt,
       toolModulePath: path.join(root, 'packages/mcp-core/tools/workspace.mjs')
     })
   })
@@ -71,6 +71,10 @@ test('Prophey workers use independent native loops and root contexts, without pi
     assert.equal(done.timedOut, false)
     assert.equal(done.record.status, 'idle')
     assert(done.record.finalText.includes(index === 0 ? 'alpha only' : 'beta only'))
+    // The worker writes its own request, so it can measure its own context: the panel shows it.
+    assert.equal(done.record.contextUsage?.contextWindow, 32000)
+    assert((done.record.contextUsage?.tokens ?? 0) > 0, 'the worker reports how full its request is')
+    assert(typeof done.record.contextUsage?.percent === 'number')
     assert.equal(notices.filter(id => id === result.record.id).length, 1)
   }
   assert.equal(process.env.AGENT_DESKTOP_ROOTS, before)

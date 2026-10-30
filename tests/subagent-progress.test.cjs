@@ -44,11 +44,13 @@ function fakeEngine() {
 async function startedManager() {
   const updates = []
   let emit
+  let status
   const manager = new SubagentManager({
     userData: path.join(temp, 'data-' + managers.length),
     onUpdate: record => updates.push(record),
-    createOwnEngine: ({ onEvent }) => {
+    createOwnEngine: ({ onEvent, onStatus }) => {
       emit = onEvent
+      status = onStatus
       return fakeEngine()
     }
   })
@@ -59,7 +61,13 @@ async function startedManager() {
     cwd: temp,
     mode: 'background'
   })
-  return { manager, record, updates, emit: event => emit(event) }
+  return {
+    manager,
+    record,
+    updates,
+    emit: event => emit(event),
+    status: patch => status?.({ phase: 'ready', cwd: temp, ...patch })
+  }
 }
 
 test('streaming deltas and in-flight tool calls are visible before the turn settles', async () => {
@@ -99,6 +107,21 @@ test('streaming deltas and in-flight tool calls are visible before the turn sett
   assert.equal(record.messages[0].text, '读取 AGENTS.md')
 })
 
+test('the run\'s own context meter reaches the record while the turn is still streaming', async () => {
+  const { record, status, updates } = await startedManager()
+  const before = updates.length
+  status({ contextUsage: { tokens: 12000, contextWindow: 200000, percent: 6 } })
+  assert.deepEqual(record.contextUsage, { tokens: 12000, contextWindow: 200000, percent: 6 })
+  assert.equal(updates.length, before + 1, 'a meter change has to reach the window')
+  // The engine republishes on every status patch; an unchanged meter must not repaint.
+  status({ isStreaming: true })
+  status({ contextUsage: { tokens: 12000, contextWindow: 200000, percent: 6 } })
+  assert.equal(updates.length, before + 1)
+  status({ contextUsage: { tokens: 34000, contextWindow: 200000, percent: 17 } })
+  assert.equal(record.contextUsage.tokens, 34000)
+  assert.equal(updates.length, before + 2)
+})
+
 test('a settled turn clears the live draft and keeps the transcript', async () => {
   const { record, emit, manager } = await startedManager()
   emit({ type: 'agent_start' })
@@ -113,6 +136,8 @@ test('a settled turn clears the live draft and keeps the transcript', async () =
   assert.equal(record.activeCalls.length, 0)
   assert.equal(record.calls.length, 1)
   assert.equal(record.calls[0].summary, 'npm test')
+  // Collecting the transcript must not drop the meter the engine published during the turn.
+  assert.equal(record.contextUsage?.tokens ?? 0, 0)
 })
 
 test('stopping a run drops its live progress instead of leaving it streaming', async () => {

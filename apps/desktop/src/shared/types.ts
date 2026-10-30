@@ -516,6 +516,11 @@ export interface SubagentView {
   }>;
   finalText?: string;
   tokens?: number;
+  /**
+   * How full the subagent's own request is, in the same shape the session meter uses. Prophey
+   * publishes it while the turn streams; pi is asked when a turn settles (`get_session_stats`).
+   */
+  contextUsage?: ContextUsage;
   runtimeMs?: number;
   createdAt: number;
   notify: "queue" | "wake" | "none";

@@ -5,7 +5,7 @@ const os = require('node:os')
 const path = require('node:path')
 const esbuild = require('esbuild')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'prophey-renderer-tests-'))
-for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'session-scroll', 'actions', 'subagents', 'layout-prefs', 'video']) {
+for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'session-scroll', 'actions', 'subagents', 'layout-prefs', 'video', 'context-usage']) {
   esbuild.buildSync({ entryPoints: [path.resolve(__dirname, '../apps/desktop/src/renderer/src/lib', name + '.ts')], outfile: path.join(temp, name + '.cjs'), bundle: true, platform: 'node', format: 'cjs' })
 }
 after(() => fs.rmSync(temp, { recursive: true, force: true }))
@@ -16,6 +16,28 @@ const { SIDEBAR_OPEN_KEY, PANEL_OPEN_KEY, readLayoutFlag, writeLayoutFlag } = re
 const { rememberScroll, recallScroll, restoreScroll, STICK_DISTANCE } = require(path.join(temp, 'session-scroll.cjs'))
 const event = (items, type, fields = {}) => apply(items, { type, ...fields }, 123)
 const { isVideo, videoTimes, videoFramePrompt } = require(path.join(temp, 'video.cjs'))
+const { contextLabel, usageMeter, usagePair, usageTone } = require(path.join(temp, 'context-usage.cjs'))
+
+test('renderer: the context meter reads the same in the composer, the panel and a subagent row', () => {
+  // Subagent rows and cards show the one-liner; 0 and missing values must not print "0K".
+  assert.equal(usageMeter({ tokens: 34000, contextWindow: 1000000, percent: 3.4 }), '3% 34K / 1M')
+  assert.equal(usageMeter({ tokens: 120, contextWindow: 32000, percent: 0.375 }), '0% 120 / 32K')
+  assert.equal(usageMeter({ tokens: 900000, contextWindow: 1000000, percent: 90 }), '90% 900K / 1M')
+  assert.equal(usageMeter({ tokens: 1500 }), '2K', 'a window-less engine still shows what it used')
+  assert.equal(usageMeter({ contextWindow: 128000 }), '— / 128K')
+  assert.equal(usageMeter(undefined), '')
+  assert.equal(usageMeter({ percent: null, tokens: null }), '')
+  assert.equal(contextLabel(0), '')
+  assert.equal(contextLabel(120), '120')
+  assert.equal(contextLabel(1050000), '1.05M')
+  assert.equal(usagePair(34000, 1000000), '34K / 1M')
+  assert.equal(usagePair(undefined, undefined), '')
+  // The tone follows the fold of the same number the meter shows.
+  assert.equal(usageTone({ percent: 12 }), '')
+  assert.equal(usageTone({ percent: 85 }), 'warn')
+  assert.equal(usageTone({ percent: 140 }), 'danger')
+  assert.equal(usageTone({ percent: null }), '')
+})
 
 test('renderer: video input samples its timeline and tells the model the frames have no audio', () => {
   assert.equal(isVideo({ name: 'demo.mp4', type: '' }), true)

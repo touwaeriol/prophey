@@ -1039,8 +1039,8 @@ function subagentManager(): SubagentManager {
     subagents = new SubagentManager({
       userData: app.getPath('userData'),
       piExtensions: () => [desktopExtensionPath('model-context.ts')].filter(existsSync),
-      createOwnEngine: ({ id, tools, appendSystemPrompt, onEvent }) => new PropheyEngine({
-        onStatus: () => {}, onEvent, onSettled: () => {},
+      createOwnEngine: ({ id, tools, appendSystemPrompt, onEvent, onStatus }) => new PropheyEngine({
+        onStatus: onStatus ?? (() => {}), onEvent, onSettled: () => {},
         toolModulePath: coreToolsModule(), shellPath: realBashPath(), allowedTools: tools,
         bashLogDirectory: path.join(app.getPath('userData'), 'command-logs'),
         appendSystemPrompt: '你是独立子代理。只完成分配的任务，返回简短结论和必要的文件位置。\n' + (appendSystemPrompt ?? ''),
@@ -1188,6 +1188,7 @@ function serializeSubagent(record: SubagentRecord): Record<string, unknown> {
     activeCalls: record.activeCalls,
     finalText: record.finalText,
     tokens: record.tokens,
+    contextUsage: record.contextUsage,
     runtimeMs: record.runtimeMs,
     createdAt: record.createdAt,
     notify: record.notify,
