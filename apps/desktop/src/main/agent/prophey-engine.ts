@@ -973,7 +973,7 @@ ${text.trim()}`,
       const result = await this.streamRound(runtime, model, tools).catch(error => ({ ok: false as const, error: describeError(error) }))
       if (result.ok) return result
       lastError = result.error
-      if (!isRetryable(lastError)) return result
+      if (isPermanent(lastError) || !isRetryable(lastError)) return result
       this.setStatus({ activity: { label: `连接异常，正在重试（${attempt + 1}/${RETRY_DELAYS_MS.length}）`, since: Date.now() } })
       this.options.onEvent({
         type: 'auto_retry_start',
@@ -982,7 +982,9 @@ ${text.trim()}`,
         error: lastError
       })
       await delay(RETRY_DELAYS_MS[attempt], undefined, { signal: this.controller?.signal })
-      this.options.onEvent({ type: 'auto_retry_end', success: false })
+      // Carry the reason: the window turns this into 「重试失败」, which reads like the end of the
+      // turn even while another attempt is queued.
+      this.options.onEvent({ type: 'auto_retry_end', success: false, finalError: lastError })
     }
     return { ok: false, error: lastError }
   }
@@ -1083,6 +1085,12 @@ ${text.trim()}`,
     }
     if (!textOf(partial).trim() && toolCallsOf(partial).length === 0) {
       this.live = undefined
+      // A stream that dies arrives as an empty message carrying `stopReason: 'error'` and the
+      // provider's own `errorMessage`. Reporting "empty reply" there hid a 503 model_not_found
+      // behind a config hint, so the provider's line wins whenever there is one.
+      if (partial.stopReason === 'error' || partial.errorMessage) {
+        return { ok: false, error: describeError(partial) }
+      }
       return { ok: false, error: '模型返回了空回复，请检查模型配置后重试' }
     }
     const message = { ...partial, api: partial.api ?? model.api,
@@ -1217,6 +1225,17 @@ function isRetryable(message: string): boolean {
   )
 }
 
+/**
+ * Failures that fail identically however many times they are retried: a model the account cannot
+ * reach, a rejected key, a malformed request. Retrying those only spends the retry budget and
+ * leaves another junk message in the transcript.
+ */
+function isPermanent(message: string): boolean {
+  return /model_not_found|no such model|does not exist|invalid_api_key|invalid_request_error|insufficient_quota|unauthorized|forbidden/i.test(
+    message
+  )
+}
+
 /** Merge a beta flag into an existing `anthropic-beta` header value without duplicating it. */
 function mergeBeta(existing: string | undefined, flag: string): string {
   const flags = (existing ?? '')
@@ -1244,9 +1263,26 @@ function basename(dir: string): string {
 }
 
 function describeError(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  if (error && typeof error === 'object') return JSON.stringify(error).slice(0, 400)
+  if (typeof error === 'string') return error.trim()
+  if (error instanceof Error) return error.message.trim() || error.name
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    // Providers fail in several shapes, and the one that matters here is the assistant message
+    // that ended the stream (`{stopReason: 'error', errorMessage, usage, cost}`). Dumping it put a
+    // page of JSON into the transcript where 「503 model_not_found」 belonged.
+    for (const key of ['errorMessage', 'message', 'error', 'detail', 'reason']) {
+      const value = record[key]
+      if (typeof value === 'string' && value.trim()) return value.trim()
+      if (value instanceof Error && value.message.trim()) return value.message.trim()
+      if (value && typeof value === 'object') {
+        const nested = value as Record<string, unknown>
+        const text = [nested.code, nested.message].filter((part) => typeof part === 'string' && part).join(': ')
+        if (text) return text
+      }
+    }
+    const code = typeof record.code === 'string' ? record.code : typeof record.type === 'string' ? record.type : ''
+    return code ? `模型调用失败（${code}）` : '模型调用失败（服务商没有给出原因）'
+  }
   return String(error)
 }
 

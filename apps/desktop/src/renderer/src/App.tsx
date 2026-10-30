@@ -59,6 +59,19 @@ import {
 } from './lib/session-scroll'
 import { applyConversationEvent } from './lib/conversation-events'
 
+/**
+ * The toast in front of 「…ms 后重试」.
+ *
+ * A retry is only worth announcing with its reason: a provider that refuses a model
+ * (`503 model_not_found`) fails the same way every time, and 「模型请求失败」 alone reads
+ * like a blip worth waiting out.
+ */
+function retryReason(error: unknown): string {
+  const text = typeof error === 'string' ? error.trim() : ''
+  if (!text) return '模型请求失败'
+  return `模型请求失败：${text.length > 120 ? `${text.slice(0, 120)}…` : text}`
+}
+
 /** Draft, images and queue of every conversation, keyed by sidebar session key. */
 const COMPOSER_STORAGE_KEY = 'pi-session-composer'
 /**
@@ -677,7 +690,9 @@ export default function App(): React.JSX.Element {
           void loadSessions()
           break
         case 'auto_retry_start':
-          setToast(`模型请求失败，${String(record.delayMs ?? 0)}ms 后重试`)
+          // Name the reason: a provider that refuses the model outright is not a blip, and
+          // without its text the toast only says something failed three times in a row.
+          setToast(`${retryReason(record.error)}，${String(record.delayMs ?? 0)}ms 后重试`)
           break
         case 'auto_retry_end':
           if (record.success === false) setToast(String(record.finalError ?? '重试失败'))
