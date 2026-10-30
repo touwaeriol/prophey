@@ -59,7 +59,9 @@ export class PropheyEngine implements AgentEngine {
    */
   private toolBatchOpen = false
   /** Turns the user steered while a batch was open; appended once its results are in. */
-  private queuedSteers: Array<Record<string, unknown>> = []
+  private queuedSteers: Array<{ id: string; message: Record<string, unknown> }> = []
+  /** Ticket counter for `cancelSteer`; ids never repeat, even across sessions. */
+  private steerSeq = 0
   /**
    * Prompt size the provider reported for the newest request, plus how much transcript it covered.
    *
@@ -830,10 +832,14 @@ ${text.trim()}`,
   }
 
   /**
-   * A steer goes straight into the transcript; the running loop answers it in its next round.
+   * A steer joins the run that is already going: it enters the transcript at the next boundary the
+   * following request can read it at, never in the middle of a tool batch.
    *
-   * `streamRound` hands the provider a `structuredClone` of the transcript, so appending while a
-   * model call is in flight cannot disturb that call.
+   * The window does not see the message until then. It shows it as a pending send with a "send now"
+   * button, and only the `message_start`/`message_end` pair below turns it into a real bubble — a
+   * steer that paints itself immediately is indistinguishable from an interrupt that already
+   * happened. `streamRound` hands the provider a `structuredClone` of the transcript, so appending
+   * while a model call is in flight cannot disturb that call.
    */
   private steer(message: string, images?: PromptImage[]): PromptResult {
     const user: Record<string, unknown> = {
@@ -841,31 +847,50 @@ ${text.trim()}`,
       content: images?.length ? [{ type: 'text', text: message }, ...images] : message,
       timestamp: Date.now()
     }
-    // The window shows the message at once; where it may enter the transcript is a separate
-    // question, answered below.
-    this.options.onEvent({ type: 'message_start', message: user })
-    this.options.onEvent({ type: 'message_end', message: user })
+    const id = `steer-${++this.steerSeq}`
     if (this.toolBatchOpen) {
       // The model already asked for tools whose results are still owed. Appending the steer right
       // now would put a user turn between the calls and their results — the exact shape that makes
       // DeepSeek/OpenAI answer `400 Messages with role 'tool' must be a response to a preceding
       // message with 'tool_calls'`, and it would be persisted that way. Hold it until the batch is
       // answered, which is also the order the model should read it in.
-      this.queuedSteers.push(user)
+      this.queuedSteers.push({ id, message: user })
     } else {
-      this.transcript.push(user)
-      this.persist()
+      this.deliverSteer({ id, message: user })
     }
     this.steerPending = true
-    return { ok: true, disposition: 'started' }
+    return { ok: true, disposition: 'started', steerId: id }
+  }
+
+  /** Put one steer into the transcript and tell the window it is no longer pending. */
+  private deliverSteer(steer: { id: string; message: Record<string, unknown> }): void {
+    this.transcript.push(steer.message)
+    this.persist()
+    this.options.onEvent({ type: 'message_start', message: steer.message })
+    this.options.onEvent({ type: 'message_end', message: steer.message })
+  }
+
+  /**
+   * Take back a steer that is still waiting for the tool batch to finish.
+   *
+   * A steer only waits while a batch is open, so "not in the list" means it is already in the
+   * transcript and the honest answer is no — the window then offers "send now" instead.
+   */
+  cancelSteer(id: string): { ok: boolean; error?: string } {
+    const index = this.queuedSteers.findIndex((entry) => entry.id === id)
+    if (index < 0) return { ok: false, error: '这条已经发出去了' }
+    this.queuedSteers.splice(index, 1)
+    // Every steer is held while a batch is open, so an empty list means nothing is left to answer.
+    if (this.queuedSteers.length === 0) this.steerPending = false
+    return { ok: true }
   }
 
   /** Append the steers a tool batch held back, in the order the user sent them. */
   private flushSteers(): void {
     if (this.queuedSteers.length === 0) return
-    this.transcript.push(...this.queuedSteers)
+    const held = this.queuedSteers
     this.queuedSteers = []
-    this.persist()
+    for (const steer of held) this.deliverSteer(steer)
   }
 
   private async run(

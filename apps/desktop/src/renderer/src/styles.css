@@ -5020,8 +5020,8 @@ body.resizing-sidebar * {
   color: var(--faint);
 }
 
-/* Turn a queued message into an immediate steer without waiting for the run to end. */
-.queue-steer {
+/* Stop the run and send this queued message now. The only hard interrupt in the app. */
+.queue-now {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -5035,9 +5035,116 @@ body.resizing-sidebar * {
   line-height: 1.7;
 }
 
-.queue-steer:hover {
+.queue-now:hover {
   background: var(--accent-soft);
   color: var(--text-strong);
+}
+
+/*
+ * Pending sends: messages the engine is holding until the current tool call or reply finishes.
+ *
+ * Pinned to the lower right of the chat area, where a just-sent bubble would be, and outside the
+ * scroller on purpose — a message that scrolls away reads as already sent, which is exactly the
+ * misunderstanding this fix is about. It is not clickable through: only the buttons take the mouse.
+ */
+.pending-sends {
+  position: absolute;
+  right: 18px;
+  bottom: 8px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: min(560px, 72%);
+  pointer-events: none;
+}
+
+.pending-send {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+  padding: 6px 10px 5px;
+  border-radius: 13px 13px 3px 13px;
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-hover);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+}
+
+.pending-send-state {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--faint);
+  font-size: 10.2px;
+}
+
+.pending-send-text {
+  color: var(--text);
+  font-size: 12.4px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Long pastes must not cover the run they are waiting for. */
+  max-height: 6.5em;
+  overflow: hidden;
+}
+
+.pending-send-images {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.pending-send-images img {
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid var(--border-soft);
+}
+
+.pending-send-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.pending-send-now {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--accent-soft);
+  background: var(--bg-elev);
+  color: var(--accent-text);
+  font-size: 10.4px;
+  line-height: 1.7;
+}
+
+.pending-send-now:hover {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+.pending-send-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: var(--faint);
+  font-size: 10.4px;
+  line-height: 1.7;
+}
+
+.pending-send-cancel:hover {
+  background: var(--border-soft);
+  color: var(--text);
 }
 
 .queue-btn:hover {

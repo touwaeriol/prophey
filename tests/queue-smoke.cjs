@@ -12,7 +12,7 @@ module.exports = async function queueSmoke(evaluate, until, window) {
   await new Promise((resolve) => setTimeout(resolve, 300))
 
   const placeholder = await evaluate('document.querySelector(".composer textarea").placeholder')
-  assert.equal(placeholder, '继续输入，Enter 引导', 'streaming placeholder stays concise')
+  assert.equal(placeholder, '继续输入，Enter 引导（等当前步骤结束）', 'streaming placeholder stays concise')
   assert.equal(await evaluate('!!document.querySelector(".composer-hint")'), false,
     'no duplicate keyboard-help row below the composer')
 
@@ -55,10 +55,10 @@ module.exports = async function queueSmoke(evaluate, until, window) {
     '队列里的这条'
   )
   const steer = await evaluate(`(() => {
-    const button = document.querySelector('.queue-steer')
+    const button = document.querySelector('.queue-now')
     return button ? button.textContent.trim() : null
   })()`)
-  assert.equal(steer, '引导', 'a queued message can be turned into an immediate steer')
+  assert.equal(steer, '立即发送', 'a queued message can be sent now, interrupting the run')
 
   // Leave no queued message behind for the steps that follow.
   await evaluate('document.querySelector(".queue-item .queue-btn:last-child").click()')

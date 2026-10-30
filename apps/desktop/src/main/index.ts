@@ -2341,6 +2341,42 @@ function registerIpc(): void {
     }
   )
 
+  /**
+   * The only hard interrupt in the app: stop the running turn, then send this message in a new one.
+   *
+   * Every other send made mid-run steers instead — it waits for the tool call or reply in flight to
+   * finish, which is what 引导 means. `steerId` names the waiting message this one replaces, so the
+   * engine drops it rather than delivering it twice (the user pressed 立即发送 on it).
+   */
+  handle(
+    'pi:send-now',
+    async (
+      _event,
+      message: string,
+      images?: PromptImage[],
+      sessionKey?: string,
+      steerId?: string
+    ) => {
+      try {
+        const owner = await promptEngineForSession(sessionKey)
+        if (steerId) owner.cancelSteer?.(steerId)
+        if (owner.busy()) {
+          await owner.abort()
+          if (!(await owner.waitForIdle(30_000))) return { ok: false, error: '当前回合停不下来，稍后再试' }
+        }
+        return await submitPrompt(message, undefined, images, owner)
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+    }
+  )
+
+  /** Take back a message that is still waiting at the engine's next boundary. */
+  handle('pi:cancel-steer', async (_event, steerId: string, sessionKey?: string) => {
+    try {
+      const owner = await promptEngineForSession(sessionKey)
+      return owner.cancelSteer?.(steerId) ?? { ok: false, error: '当前引擎不支持撤回，让它自己发出' }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+  })
+
   handle('pi:abort', async () => {
     cancelPendingAsks('用户中止了本次运行')
     // A subagent that settles right after a manual stop must not start a new turn behind the

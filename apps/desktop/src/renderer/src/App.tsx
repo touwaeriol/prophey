@@ -27,6 +27,7 @@ import { ConfirmDialog, type ConfirmRequest } from './components/ConfirmDialog'
 import { SubagentsDrawer } from './components/SubagentsDrawer'
 import { TaskDrawer, type TaskTarget } from './components/TaskDrawer'
 import { RunStatusBar } from './components/RunStatusBar'
+import { PendingSends, type PendingSend } from './components/PendingSends'
 import { SessionPanel } from './components/SessionPanel'
 import { Markdown } from './components/Markdown'
 import type { DraftImage } from './lib/images'
@@ -173,6 +174,17 @@ export default function App(): React.JSX.Element {
     },
     [activeComposerKey]
   )
+  /**
+   * Messages the engine is holding until the current step finishes (a steer), oldest first.
+   *
+   * Not part of the transcript and not persisted: an entry lives from the moment Enter is pressed
+   * until the engine's own user-message event says it reached the transcript. The session key keeps
+   * a send parked while the user looks at another conversation.
+   */
+  const [pendingSends, setPendingSends] = useState<PendingSend[]>([])
+  const dropPendingSend = useCallback((id: string) => {
+    setPendingSends((prev) => prev.filter((entry) => entry.id !== id))
+  }, [])
   const setQueued = useCallback(
     (next: QueuedMessage[] | ((previous: QueuedMessage[]) => QueuedMessage[])) => {
       setComposers((map) =>
@@ -185,6 +197,7 @@ export default function App(): React.JSX.Element {
   )
   useEffect(() => {
     // Keystrokes typed before the window knew its session belong to the session it lands on.
+    // (Pending sends are state, see below.)
     if (!activePath) return
     setComposers((map) => adoptComposer(map, LOCAL_COMPOSER_KEY, composerKey(activePath)))
   }, [activePath])
@@ -667,6 +680,18 @@ export default function App(): React.JSX.Element {
       messagesRequest.current++
       const now = Date.now()
       setItems((prev) => applyConversationEvent(prev, record, now))
+      // A user message from the engine means a message that was waiting really got in — the pending
+      // send that matches it (oldest for that session, in send order) is no longer pending.
+      if (
+        (type === 'message_start' || type === 'message_end') &&
+        (record.message as { role?: string } | undefined)?.role === 'user'
+      ) {
+        const key = composerKey(record.sessionKey as string | undefined)
+        setPendingSends((prev) => {
+          const index = prev.findIndex((entry) => entry.key === key)
+          return index < 0 ? prev : prev.filter((_, at) => at !== index)
+        })
+      }
       switch (type) {
         case 'agent_start':
           setRun({ startedAt: Date.now(), runningTools: 0 })
@@ -679,6 +704,12 @@ export default function App(): React.JSX.Element {
           break
         case 'agent_settled':
           setRun((prev) => ({ ...prev, endedAt: Date.now(), runningTools: 0 }))
+          // A run cannot settle with a steer still waiting: the engine flushes them first. Anything
+          // left here was delivered without an event, so the strip must not keep a ghost.
+          {
+            const key = composerKey(record.sessionKey as string | undefined)
+            setPendingSends((prev) => prev.filter((entry) => entry.key !== key))
+          }
           void window.pi
             .getSessionStats()
             .then((stats) => {
@@ -930,21 +961,29 @@ export default function App(): React.JSX.Element {
       // the text there even if the user switched conversations in the meantime.
       if (owner !== composerKeyRef.current || statusRef.current.switchingEngine) return false
       setStick(true)
-      const localId = `local-${Date.now()}`
-      setItems((prev) => [
-        ...prev,
-        {
-          id: localId,
-          role: 'user',
-          text,
-          images: images.map((image) => ({ data: image.data, mimeType: image.mimeType })),
-          toolCalls: [],
-          pending: true
-        }
-      ])
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       // Video conversion is a renderer-only concern: the engine still receives plain images,
       // while this text tells it that those images form one time-ordered video.
       const promptText = [videoFramePrompt(images), text].filter(Boolean).join('\n\n')
+      const steering = behavior === 'steer'
+      // A steer waits at the engine's next boundary, so it is not in the transcript yet: it is shown
+      // as a pending send until the engine's user-message event says it got in. Anything else is in
+      // the transcript by definition, so it gets the optimistic bubble.
+      if (steering) {
+        setPendingSends((prev) => [...prev, { id: localId, key: owner, text, images, promptText }])
+      } else {
+        setItems((prev) => [
+          ...prev,
+          {
+            id: localId,
+            role: 'user',
+            text,
+            images: images.map((image) => ({ data: image.data, mimeType: image.mimeType })),
+            toolCalls: [],
+            pending: true
+          }
+        ])
+      }
       const result = await window.pi.prompt(
         promptText,
         behavior,
@@ -953,9 +992,10 @@ export default function App(): React.JSX.Element {
           data: image.data,
           mimeType: image.mimeType
         })), owner
-      ).catch(error => ({ ok: false, error: error instanceof Error ? error.message : String(error), queued: false }))
+      ).catch(error => ({ ok: false as const, error: error instanceof Error ? error.message : String(error), queued: false }))
       if (!result.ok) {
-        setItems((prev) => prev.filter((item) => item.id !== localId))
+        if (steering) dropPendingSend(localId)
+        else setItems((prev) => prev.filter((item) => item.id !== localId))
         if (restoreDraft) setComposers((map) => patchComposer(map, owner, previous => ({
           draft: previous.draft ? `${text}\n${previous.draft}` : text,
           images: [...images, ...previous.images]
@@ -963,10 +1003,62 @@ export default function App(): React.JSX.Element {
         if (owner === composerKeyRef.current) setToast(result.error ?? '发送失败')
         return false
       }
+      if (steering && result.steerId) {
+        setPendingSends((prev) =>
+          prev.map((entry) => (entry.id === localId ? { ...entry, steerId: result.steerId } : entry))
+        )
+      }
       if (result.queued) setToast('pi 还在收尾，这条已排队，会在本轮结束后发送')
       return true
     },
-    []
+    [dropPendingSend]
+  )
+
+  /**
+   * 立即发送: the one hard interrupt in the app.
+   *
+   * Everything else sent mid-run steers, which means it waits for the tool call or reply in flight.
+   * This stops that turn and sends the message in a new one; a waiting steer for the same text is
+   * retracted first (its ticket travels with the call) so nothing goes out twice.
+   */
+  const sendNow = useCallback(
+    async (item: PendingSend): Promise<void> => {
+      dropPendingSend(item.id)
+      setStick(true)
+      const result = await window.pi
+        .sendNow(
+          item.promptText,
+          item.images.map((image) => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType })),
+          item.key,
+          item.steerId
+        )
+        .catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+      if (result.ok) return
+      // Nothing went out: the text goes back where the user can read and edit it.
+      setComposers((map) =>
+        patchComposer(map, item.key, (previous) => ({
+          draft: previous.draft ? `${item.text}\n${previous.draft}` : item.text,
+          images: [...item.images, ...previous.images]
+        }))
+      )
+      if (item.key === composerKeyRef.current) setToast(result.error ?? '发送失败')
+    },
+    [dropPendingSend]
+  )
+
+  /** 撤回: take back a message the engine is still holding. */
+  const cancelPendingSend = useCallback(
+    async (item: PendingSend): Promise<void> => {
+      dropPendingSend(item.id)
+      if (!item.steerId) return
+      const result = await window.pi
+        .cancelSteer(item.steerId, item.key)
+        .catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+      // Too late to retract is not an error the user caused: the message simply goes out, and its
+      // bubble appears in the transcript when it does.
+      if (!result.ok && item.key === composerKeyRef.current) setToast(result.error ?? '这条已经发出去了')
+    },
+    [dropPendingSend]
   )
 
   /** Runs a desktop slash command; returns true when the text was consumed. */
@@ -1543,6 +1635,11 @@ export default function App(): React.JSX.Element {
                   onJump={jumpToMessage}
                 />
               )}
+              <PendingSends
+                items={pendingSends.filter((entry) => entry.key === activeComposerKey)}
+                onSendNow={(item) => void sendNow(item)}
+                onCancel={(item) => void cancelPendingSend(item)}
+              />
             </div>
 
             {ask && (
@@ -1575,15 +1672,17 @@ export default function App(): React.JSX.Element {
                 setDraft(target.text)
                 setDraftImages(target.images)
               }}
-              onQueueSteer={(id) => {
+              onQueueSendNow={(id) => {
                 const target = queued.find((item) => item.id === id)
                 if (!target || target.command) return
-                if (!capabilities?.steer) {
-                  setToast('当前引擎不支持运行中引导')
-                  return
-                }
                 setQueued((prev) => prev.filter((item) => item.id !== id))
-                void deliver(target.text, target.images, 'steer')
+                void sendNow({
+                  id: target.id,
+                  key: activeComposerKey,
+                  text: target.text,
+                  images: target.images,
+                  promptText: [videoFramePrompt(target.images), target.text].filter(Boolean).join('\n\n')
+                })
               }}
               onNotice={setToast}
               onSend={(mode) => void send(mode)}

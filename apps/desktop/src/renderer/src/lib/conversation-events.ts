@@ -83,10 +83,31 @@ function appendDelta(items: ChatItem[], field: 'text' | 'thinking', delta: strin
 }
 
 
-function patchPendingUser(items: ChatItem[], content?: unknown): ChatItem[] {
+/**
+ * A user turn reaching the window.
+ *
+ * Two shapes arrive here. `deliver()` paints an optimistic bubble before it sends, and the engine's
+ * event then fills in what was actually stored (that is the `pending` branch). A steered message has
+ * no optimistic bubble at all: it waits at the engine's next boundary, the window shows it as a
+ * pending send, and this event is the moment it really entered the transcript. It is appended as
+ * pending so the matching `message_end` completes it instead of adding a second copy.
+ */
+function patchPendingUser(items: ChatItem[], content?: unknown, now = 0): ChatItem[] {
   const index = items.findLastIndex((item) => item.role === 'user' && item.pending)
-  if (index < 0) return items
   const images = imagesFromBlocks(content)
+  if (index < 0) {
+    return [
+      ...items,
+      {
+        id: 'user-' + now + '-' + items.length,
+        role: 'user',
+        text: textFromBlocks(content),
+        images,
+        toolCalls: [],
+        pending: true
+      }
+    ]
+  }
   const next = items.slice()
   next[index] = {
     ...next[index],
@@ -103,7 +124,7 @@ function finishMessage(items: ChatItem[], message: MessagePayload, now: number):
     const text = noticeText(textFromBlocks(message.content))
     return text ? [...items, { id: 'notice-' + now + '-' + items.length, role: 'system', text, toolCalls: [] }] : items
   }
-  if (message.role === 'user') return patchPendingUser(items, message.content)
+  if (message.role === 'user') return patchPendingUser(items, message.content, now)
   if (message.role !== 'assistant') return items
   return patchLastAssistant(items, (item) => {
     const calls = toolCallsFromBlocks(message.content)
@@ -131,7 +152,7 @@ export function applyConversationEvent(items: ChatItem[], record: Record<string,
   switch (record.type) {
     case 'message_start': {
       const message = record.message as MessagePayload | undefined
-      if (message?.role === 'user') return patchPendingUser(items)
+      if (message?.role === 'user') return patchPendingUser(items, message.content, now)
       if (message?.role !== 'assistant') return items
       return [...items, { id: 'assistant-' + now + '-' + items.length, role: 'assistant', text: '', thinking: '', toolCalls: [], streaming: true }]
     }
@@ -155,7 +176,11 @@ export function applyConversationEvent(items: ChatItem[], record: Record<string,
         durationMs: typeof record.durationMs === 'number' ? record.durationMs : undefined
       }))
     case 'agent_settled':
-      return items.map((item) => item.streaming ? { ...item, streaming: false } : item)
+      // A bubble without its `message_end` is still a real message (the engine persisted it), so a
+      // settle clears the dim rather than leaving it pending forever.
+      return items.map((item) =>
+        item.streaming || item.pending ? { ...item, streaming: false, pending: false } : item
+      )
     default:
       return items
   }

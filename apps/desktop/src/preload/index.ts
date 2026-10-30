@@ -67,6 +67,10 @@ const bridge: PiBridge = {
     ipcRenderer.invoke('pi:choose-workspace', options) as Promise<PiStatus | null>,
   prompt: (message: string, streamingBehavior?: 'steer' | 'followUp', images?: PromptImage[], sessionKey?: string) =>
     ipcRenderer.invoke('pi:prompt', message, streamingBehavior, images, sessionKey),
+  sendNow: (message: string, images?: PromptImage[], sessionKey?: string, steerId?: string) =>
+    ipcRenderer.invoke('pi:send-now', message, images, sessionKey, steerId),
+  cancelSteer: (steerId: string, sessionKey?: string) =>
+    ipcRenderer.invoke('pi:cancel-steer', steerId, sessionKey),
   abort: () => ipcRenderer.invoke('pi:abort') as Promise<void>,
   newSession: (options) => ipcRenderer.invoke('pi:new-session', options),
   switchSession: (sessionPath: string) => ipcRenderer.invoke('pi:switch-session', sessionPath),

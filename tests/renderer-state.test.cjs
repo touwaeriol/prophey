@@ -66,6 +66,30 @@ test('renderer: native string messages survive both streaming and session restor
   assert.equal(toChatItems([message])[0].text, items[0].text)
 })
 
+test('renderer: a steered message that only now lands gets its own bubble, once', () => {
+  let items = event([], 'message_start', { message: { role: 'assistant' } })
+  items = event(items, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: '先做完这一步' }] } })
+  // The engine let the steer into the transcript: there is no optimistic bubble to patch.
+  items = event(items, 'message_start', { message: { role: 'user', content: '顺便改一下' } })
+  assert.equal(items.length, 2)
+  assert.equal(items[1].role, 'user')
+  assert.equal(items[1].text, '顺便改一下')
+  assert.equal(items[1].pending, true, 'its message_end completes it instead of adding a second copy')
+  items = event(items, 'message_end', { message: { role: 'user', content: '顺便改一下' } })
+  assert.equal(items.length, 2, 'one bubble per turn')
+  assert.equal(items[1].pending, false)
+  // A start without content still ends up whole rather than as an empty bubble.
+  let bare = event([], 'message_start', { message: { role: 'user' } })
+  assert.equal(bare[0].pending, true)
+  bare = event(bare, 'message_end', { message: { role: 'user', content: [{ type: 'text', text: '后补的文字' }] } })
+  assert.equal(bare.length, 1)
+  assert.equal(bare[0].text, '后补的文字')
+  assert.equal(bare[0].pending, false)
+  // Settling without a message_end must not leave a half-painted bubble behind.
+  const settled = event(bare, 'agent_settled', {})
+  assert.equal(settled[0].pending, false)
+})
+
 test('renderer: tool completion preserves arguments and survives final assistant snapshot', () => {
   let items = event([], 'message_start', { message: { role: 'assistant' } })
   items = event(items, 'tool_execution_start', { toolCallId: 'tool-1', toolName: 'Read', args: { path: 'file.ts' } })

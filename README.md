@@ -9,6 +9,7 @@ adapters; the desktop owns projects, session navigation and UI.
 
 - Project-grouped session sidebar with per-project search and status filters
 - Streaming chat, tool cards, Markdown, thinking blocks, abort/queue
+- A message sent mid-run steers instead of interrupting: it waits for the tool call or reply in flight, is shown as a pinned "pending" bubble at the lower right, and only enters the transcript when the engine lets it in — with "send now" as the one deliberate hard interrupt
 - Paste or drop images into the composer; images are sent to the model and stay viewable in the transcript
 - Model picker and model allow-list per provider
 - Provider login (OAuth / API key), custom providers via `models.json`

@@ -194,6 +194,13 @@ export interface PromptResult {
   disposition?: "started" | "queued" | "handled";
   /** pi was busier than the window thought and queued the message instead of rejecting it. */
   queued?: boolean;
+  /**
+   * The ticket for a steer the engine is holding until the current step finishes.
+   *
+   * The window shows that message as a pending send with a "send now" button; the same id is what
+   * `cancelSteer` takes back, and what `sendNow` passes along so one message never goes out twice.
+   */
+  steerId?: string;
   error?: string;
 }
 
@@ -678,6 +685,21 @@ export interface PiBridge {
     images?: PromptImage[],
     sessionKey?: string,
   ): Promise<PromptResult>;
+  /**
+   * Stop the running turn and send this message in a new one.
+   *
+   * This is the only hard interrupt in the app: a plain send mid-run steers instead, which waits for
+   * the tool call or reply in flight to finish. `steerId` names the waiting message this replaces, so
+   * the engine can drop it instead of delivering it twice.
+   */
+  sendNow(
+    message: string,
+    images?: PromptImage[],
+    sessionKey?: string,
+    steerId?: string,
+  ): Promise<PromptResult>;
+  /** Take back a steer that is still waiting; fails once it has been handed to the transcript. */
+  cancelSteer(steerId: string, sessionKey?: string): Promise<{ ok: boolean; error?: string }>;
   abort(): Promise<void>;
   newSession(options?: SessionSwitchOptions): Promise<SwitchResult>;
   switchSession(sessionPath: string): Promise<SwitchResult>;

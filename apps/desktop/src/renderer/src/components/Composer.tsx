@@ -62,7 +62,7 @@ export function Composer({
   queued,
   onQueueRemove,
   onQueueEdit,
-  onQueueSteer,
+  onQueueSendNow,
   onNotice,
   onSend,
   onStop,
@@ -85,7 +85,8 @@ export function Composer({
   queued: QueuedMessage[]
   onQueueRemove: (id: string) => void
   onQueueEdit: (id: string) => void
-  onQueueSteer: (id: string) => void
+  /** Stop the run and send this queued item now — the only hard interrupt in the app. */
+  onQueueSendNow: (id: string) => void
   onNotice?: (message: string) => void
   onSend: (mode: 'send' | 'steer') => void
   onStop: () => void
@@ -486,8 +487,8 @@ export function Composer({
             <span className="queue-count">{queued.length} 条排队消息</span>
             <span className="queue-hint">
               {queued.some((item) => item.command)
-                ? '回合结束后自动发送 / 执行；点「引导」可立即插入当前回合'
-                : '回合结束后自动发送；点「引导」可立即插入当前回合'}
+                ? '回合结束后自动发送 / 执行；点「立即发送」会打断当前回合'
+                : '回合结束后自动发送；点「立即发送」会打断当前回合'}
             </span>
           </div>
           {queued.map((item) => (
@@ -496,14 +497,14 @@ export function Composer({
               <span className="queue-text" title={item.text}>
                 {item.text || `${item.images.length} 张图片`}
               </span>
-              {!item.command && capabilities?.steer && (
+              {!item.command && (
                 <button
-                  className="queue-steer"
-                  title="作为引导立即插入当前回合（不打断生成）"
-                  onClick={() => onQueueSteer(item.id)}
+                  className="queue-now"
+                  title="停掉当前回合，立刻把这条发出去"
+                  onClick={() => onQueueSendNow(item.id)}
                 >
                   <SendIcon size={10} />
-                  引导
+                  立即发送
                 </button>
               )}
               <button className="queue-btn" title="编辑" onClick={() => onQueueEdit(item.id)}>
@@ -593,7 +594,7 @@ export function Composer({
                   ? '正在压缩上下文，结束后会自动继续…'
                   : streaming
                     ? capabilities?.steer
-                      ? '继续输入，Enter 引导'
+                      ? '继续输入，Enter 引导（等当前步骤结束）'
                       : '继续输入，Enter 排队'
                     : '发送消息…（可粘贴图片，或添加图片 / 视频）'
             }

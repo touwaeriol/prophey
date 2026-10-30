@@ -75,6 +75,13 @@ export interface AgentEngine {
   ): Promise<PromptResult>
   /** Send one message with no queueing or retry logic (used for the `/btw` fork). */
   send(message: string): Promise<void>
+  /**
+   * Take back a steer this engine is still holding, before it reached the transcript.
+   *
+   * Optional on purpose: an engine that hands the message straight to its own agent (pi) cannot
+   * un-send it, and then the window keeps the message instead of pretending it was retracted.
+   */
+  cancelSteer?(id: string): { ok: boolean; error?: string }
 
   // Session and model operations. These are semantic on purpose: the window must not need to know
   // an engine's command names, or a second engine could never be dropped in.

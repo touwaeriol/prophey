@@ -477,7 +477,9 @@ test('Prophey: Enter mid-run steers into the running turn instead of queueing', 
     if (rounds === 1) {
       // The user hits Enter while the model is answering.
       const steered = await engine.prompt('改成中文回答', { behavior: 'steer' })
-      assert.deepEqual(steered, { ok: true, disposition: 'started' })
+      assert.equal(steered.ok, true)
+      assert.equal(steered.disposition, 'started')
+      assert.match(steered.steerId, /^steer-/, 'the window gets a ticket for retracting it')
       assert.equal(engine.steerPending, true, 'the loop is asked for one more round')
       return { ok: true, message: { role: 'assistant', content: [{ type: 'text', text: '好的' }] } }
     }
@@ -498,4 +500,34 @@ test('Prophey: Enter mid-run steers into the running turn instead of queueing', 
   engine.isBusy = true
   assert.match((await engine.prompt('普通发送')).error, /上一轮还没结束/)
   engine.isBusy = false
+})
+
+test('Prophey: a steer waits for the tool batch and can be taken back before it goes in', async () => {
+  const { PropheyEngine } = require(path.join(temp, 'prophey-engine.cjs'))
+  const events = []
+  const engine = new PropheyEngine(callbacks(events))
+  engine.setStatus({ phase: 'ready' })
+  engine.isBusy = true
+  engine.toolBatchOpen = true
+  const userStarts = () => events.filter((event) => event.type === 'message_start' && event.message?.role === 'user')
+
+  const held = await engine.prompt('先别打断', { behavior: 'steer' })
+  assert.equal(held.ok, true)
+  assert.match(held.steerId, /^steer-/)
+  // The message is not in the transcript, so the window must not paint it as sent.
+  assert.equal(userStarts().length, 0, 'a held steer reaches the window only when it lands')
+  assert.equal((await engine.messages()).filter((message) => message.role === 'user').length, 0)
+
+  // 立即发送 replaces it: the held copy is dropped instead of going out a second time.
+  assert.deepEqual(engine.cancelSteer(held.steerId), { ok: true })
+  assert.equal(engine.steerPending, false, 'nothing is left for the loop to answer')
+  assert.equal(engine.cancelSteer('steer-missing').ok, false, 'an unknown ticket is refused, not ignored')
+
+  const kept = await engine.prompt('这句要发', { behavior: 'steer' })
+  engine.toolBatchOpen = false
+  engine.flushSteers()
+  const delivered = events.filter((event) => event.type === 'message_end' && event.message?.role === 'user')
+  assert.deepEqual(delivered.map((event) => event.message.content), ['这句要发'])
+  assert.equal((await engine.messages()).at(-1).content, '这句要发')
+  assert.equal(engine.cancelSteer(kept.steerId).ok, false, 'once it is in the transcript there is no retracting')
 })
