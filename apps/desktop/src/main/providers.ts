@@ -25,6 +25,7 @@ import {
   modelsPath,
   settingsPath
 } from './profile'
+import { declaresImageInput } from '../shared/model-input'
 
 const DEFAULT_MODELS_JSON = JSON.stringify(
   {
@@ -588,6 +589,20 @@ export async function listModelChoices(
     })
   choicesCache = { key: cacheKey, data }
   return data
+}
+
+/**
+ * Whether a model entry accepts images at all.
+ *
+ * pi defaults a missing `input` to `['text']` and then swaps every image for
+ * "(image omitted: model does not support images)" before the request goes out, so a screenshot
+ * sent to an undeclared model disappears without an error. Callers use this to tell the user
+ * instead of letting the picture vanish.
+ */
+export async function modelSupportsImages(provider: string, id: string): Promise<boolean> {
+  const runtime = await getRuntime()
+  const model = runtime.getModels().find((entry) => entry.provider === provider && entry.id === id)
+  return declaresImageInput(model?.input)
 }
 
 export interface ModelResolution {

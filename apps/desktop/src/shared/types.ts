@@ -687,6 +687,10 @@ export interface PiBridge {
   openAgentDir(): Promise<void>;
   openExternal(url: string): Promise<void>;
   copyImage(dataUrl: string): Promise<{ ok: boolean; error?: string }>;
+  /** Mirror one session's draft/images/queue to disk; the main process debounces the write. */
+  saveComposer(key: string, entry: unknown): Promise<void>;
+  /** Every mirrored entry, as the JSON shape `localStorage` holds (null when nothing is saved). */
+  loadComposers(): Promise<string | null>;
   setTheme(theme: "dark" | "light"): Promise<void>;
   listModels(): Promise<ModelOption[]>;
   setModel(

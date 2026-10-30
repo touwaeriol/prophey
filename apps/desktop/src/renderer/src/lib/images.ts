@@ -1,4 +1,5 @@
 import { MAX_CLIPBOARD_IMAGE_PIXELS, MAX_CLIPBOARD_PNG_BYTES } from '../../../shared/image-clipboard'
+import type { VideoFrameInfo } from './video'
 
 /** Rasterize the displayed image, not its URL, so JPEG/WebP/etc. copy as a real PNG. */
 export async function copyPreviewImage(image: HTMLImageElement): Promise<void> {
@@ -31,6 +32,8 @@ export interface DraftImage {
   data: string
   mimeType: string
   name?: string
+  /** Set only on extracted video frames; used to label their thumbnails. */
+  video?: VideoFrameInfo
 }
 
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024

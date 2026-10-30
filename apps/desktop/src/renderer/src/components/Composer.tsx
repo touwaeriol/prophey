@@ -9,6 +9,7 @@ import {
   ChevronIcon,
   CloseIcon,
   FolderIcon,
+  PaperclipIcon,
   PencilIcon,
   SearchIcon,
   SendIcon,
@@ -19,6 +20,7 @@ import { insertFileMention } from '../lib/composer'
 import { useDismissable } from '../hooks/useDismissable'
 import type { QueuedMessage } from '../lib/chat-types'
 import { blobToDraftImage, clipboardImages, imageSrc, type DraftImage } from '../lib/images'
+import { extractVideoFrames, isVideo } from '../lib/video'
 
 function contextLabel(value?: number): string {
   if (!value) return ''
@@ -123,6 +125,8 @@ export function Composer({
   const contextRef = useRef<HTMLDivElement>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [convertingVideos, setConvertingVideos] = useState(0)
   const [modelOpen, setModelOpen] = useState(false)
   const [models, setModels] = useState<ModelOption[]>([])
   const [modelQuery, setModelQuery] = useState('')
@@ -197,19 +201,29 @@ export function Composer({
 
   const addImages = useCallback(
     async (files: File[]): Promise<void> => {
-      const added: DraftImage[] = []
       for (const file of files) {
-        const image = await blobToDraftImage(file, file.name || undefined)
-        if (!image) {
-          onNotice?.('图片超过 8MB，已跳过')
-          continue
+        let added: DraftImage[] = []
+        if (isVideo(file)) {
+          setConvertingVideos(count => count + 1)
+          try {
+            added = await extractVideoFrames(file)
+          } catch (error) {
+            onNotice?.(error instanceof Error ? error.message : String(error))
+          } finally {
+            setConvertingVideos(count => Math.max(0, count - 1))
+          }
+        } else {
+          const image = await blobToDraftImage(file, file.name || undefined)
+          if (!image) onNotice?.('图片超过 8MB，已跳过')
+          else added = [image]
         }
-        added.push(image)
+        if (added.length === 0) continue
+        // Read the ref after every await: concurrent decoding and session changes must not make
+        // one async result overwrite the other attachments or restore images already sent.
+        const next = [...imagesRef.current, ...added]
+        imagesRef.current = next
+        onImagesChange(next)
       }
-      if (added.length === 0) return
-      const next = [...imagesRef.current, ...added]
-      imagesRef.current = next
-      onImagesChange(next)
     },
     [onImagesChange, onNotice]
   )
@@ -229,7 +243,7 @@ export function Composer({
       // Nothing may be attached while pi is not accepting prompts (or a `/btw` fork is open).
       // Say so instead of dropping the paste: the image is gone from the clipboard by then.
       if (disabled) {
-        onNotice?.('现在不能添加图片：pi 未就绪，或侧边提问窗口还开着')
+        onNotice?.('现在不能添加图片或视频：pi 未就绪，或侧边提问窗口还开着')
         return
       }
       void addImages(files)
@@ -523,7 +537,7 @@ export function Composer({
         }}
         onDrop={(event) => {
           const files = Array.from(event.dataTransfer.files).filter((file) =>
-            file.type.startsWith('image/')
+            file.type.startsWith('image/') || isVideo(file)
           )
           if (files.length === 0) return
           event.preventDefault()
@@ -552,6 +566,11 @@ export function Composer({
           </div>
         )}
         <DraftImageStrip images={images} onRemove={removeImage} onPreview={setPreview} />
+        {convertingVideos > 0 && (
+          <div className="video-converting" role="status">
+            正在本地抽取关键帧…视频不会原样上传，暂不支持音轨识别
+          </div>
+        )}
         {suggestionFits && (
           <button
             type="button"
@@ -584,7 +603,7 @@ export function Composer({
                     ? capabilities?.steer
                       ? '继续输入，Enter 引导'
                       : '继续输入，Enter 排队'
-                    : '发送消息…（可直接粘贴图片）'
+                    : '发送消息…（可粘贴图片，或添加图片 / 视频）'
             }
             onChange={(event) => {
               const next = event.target.value
@@ -638,6 +657,10 @@ export function Composer({
               if (event.nativeEvent.isComposing) return
               if (event.shiftKey) return
               event.preventDefault()
+              if (convertingVideos > 0) {
+                onNotice?.('视频正在抽帧，请稍候再发送')
+                return
+              }
               // Running turn: Enter steers (the message joins the current run), Ctrl+Enter queues it
               // for after the run. Idle, both just send.
               if (event.ctrlKey || event.metaKey) onSend('send')
@@ -655,8 +678,30 @@ export function Composer({
         </div>
         <div className="composer-foot">
           <div className="composer-left" ref={contextRef}>
+            <input
+              ref={fileRef}
+              className="attachment-input"
+              type="file"
+              accept="image/*,video/mp4,video/webm,video/quicktime,video/ogg,.mkv"
+              multiple
+              tabIndex={-1}
+              aria-hidden
+              onChange={(event) => {
+                handleFiles(Array.from(event.target.files ?? []))
+                event.target.value = ''
+              }}
+            />
             <button
-              className={`attach-btn ${contextOpen ? 'open' : ''}`}
+              className="attach-btn media-attach"
+              disabled={disabled || convertingVideos > 0}
+              title="添加图片或视频（视频本地抽帧，不含音轨）"
+              aria-label="添加图片或视频"
+              onClick={() => fileRef.current?.click()}
+            >
+              <PaperclipIcon size={16} />
+            </button>
+            <button
+              className={`attach-btn context-btn ${contextOpen ? 'open' : ''}`}
               title="引用上下文（@ 文件或目录）"
               onClick={() => void openContextPicker()}
             >
@@ -911,8 +956,8 @@ export function Composer({
               <button
                 className="send-btn"
                 onClick={() => onSend('send')}
-                disabled={disabled || (!value.trim() && images.length === 0)}
-                title="发送 (Enter)"
+                disabled={disabled || convertingVideos > 0 || (!value.trim() && images.length === 0)}
+                title={convertingVideos > 0 ? '视频正在抽帧' : '发送 (Enter)'}
               >
                 <SendIcon size={15} />
               </button>

@@ -330,6 +330,23 @@ export function ImageIcon(props: IconProps) {
   )
 }
 
+export function PaperclipIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="m20 11-8.5 8.5a5 5 0 0 1-7-7L14 3a3.5 3.5 0 0 1 5 5l-9.5 9.5a2 2 0 0 1-3-3L15 6" />
+    </svg>
+  )
+}
+
+export function VideoIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+      <path d="m10 9 5 3-5 3z" />
+    </svg>
+  )
+}
+
 export function EllipsisIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

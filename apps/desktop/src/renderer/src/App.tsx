@@ -39,6 +39,7 @@ import {
   composerKey,
   isEmptyComposer,
   LOCAL_COMPOSER_KEY,
+  mergeComposers,
   parseComposers,
   patchComposer,
   serializeComposers,
@@ -47,6 +48,7 @@ import {
 import { PANEL_OPEN_KEY, SIDEBAR_OPEN_KEY, SIDEBAR_WIDTH_KEY, readLayoutFlag, readLayoutNumber, writeLayoutFlag, writeLayoutNumber } from './lib/layout-prefs'
 import { updateStatusText } from './lib/updates'
 import { toChatItems, type ChatItem } from './lib/messages'
+import { videoFramePrompt } from './lib/video'
 import { messagesBelong } from './lib/session-messages'
 import {
   recallScroll,
@@ -121,6 +123,10 @@ export default function App(): React.JSX.Element {
     }
   })
   /** Session the composer currently belongs to; a ref so async callbacks target the same one. */
+  /** Newest entry already mirrored to the main process, per session (avoids re-sending unchanged ones). */
+  const mirroredRef = useRef<Record<string, number>>({})
+  /** Images already mirrored, per session; identity tells us when they changed. */
+  const mirroredImagesRef = useRef<Record<string, unknown>>({})
   const composerKeyRef = useRef(LOCAL_COMPOSER_KEY)
   /**
    * The predicted next message, and the conversation it was predicted in.
@@ -219,7 +225,34 @@ export default function App(): React.JSX.Element {
     } catch {
       // storage refused the write: the map still lives in memory
     }
+    // Mirror to the main process, which writes with fs: localStorage only reaches the disk seconds
+    // later (Chromium batches the LevelDB commit), so a crash would otherwise lose whatever was
+    // typed since then. Only entries that changed are sent, and images ride along only when they
+    // changed - a screenshot in the draft must not be re-sent on every keystroke.
+    for (const [key, entry] of Object.entries(composers)) {
+      if ((entry.at ?? 0) <= (mirroredRef.current[key] ?? 0)) continue
+      mirroredRef.current[key] = entry.at ?? 0
+      const imagesChanged = mirroredImagesRef.current[key] !== entry.images
+      if (imagesChanged) mirroredImagesRef.current[key] = entry.images
+      void window.pi.saveComposer(key, {
+        draft: entry.draft,
+        queued: entry.queued,
+        images: imagesChanged ? entry.images : undefined,
+        imagesChanged,
+        at: entry.at ?? Date.now()
+      }).catch(() => undefined)
+    }
   }, [composers])
+  // localStorage is the fast path but Chromium commits it seconds late; the main process mirror is on
+  // disk immediately. Take whichever copy of each session is newer, so a crash costs nothing.
+  useEffect(() => {
+    void window.pi.loadComposers().then((raw) => {
+      const saved = parseComposers(raw)
+      if (!Object.keys(saved).length) return
+      setComposers((current) => mergeComposers(current, saved))
+    }).catch(() => undefined)
+  }, [])
+
   const [btwChat, setBtwChat] = useState<BtwChat | undefined>(undefined)
   const [btwDraft, setBtwDraft] = useState('')
   const [mcpOpen, setMcpOpen] = useState(false)
@@ -894,8 +927,11 @@ export default function App(): React.JSX.Element {
           pending: true
         }
       ])
+      // Video conversion is a renderer-only concern: the engine still receives plain images,
+      // while this text tells it that those images form one time-ordered video.
+      const promptText = [videoFramePrompt(images), text].filter(Boolean).join('\n\n')
       const result = await window.pi.prompt(
-        text,
+        promptText,
         behavior,
         images.map((image) => ({
           type: 'image' as const,

@@ -24,6 +24,7 @@ import { generateSessionTitle, promptTitle } from './session-title'
 import { generateSuggestion } from './suggest'
 import { suggestionContext } from './suggestion-text'
 import { TranscriptStore } from './transcript-store'
+import { ComposerStore } from './composer-store'
 import * as providers from './providers'
 import { chatGptUsage, invalidateChatGptUsage } from './chatgpt-usage'
 import * as updates from './updates'
@@ -88,6 +89,15 @@ let projectStore: projects.ProjectStore | undefined
  * engine will not change how sessions are listed, sorted or grouped.
  */
 let sessionStore: SessionStore | undefined
+
+/**
+ * Crash-safe mirror of the composer drafts.
+ *
+ * `localStorage` is the renderer's fast path (synchronous on the first paint) but its disk commit is
+ * batched by Chromium seconds later, so a crash loses the last few seconds of typing. This store is
+ * written with `fs` on every change instead — see `composer-store.ts` for the measurements.
+ */
+const composerStore = new ComposerStore(path.join(app.getPath('userData'), 'composer'))
 
 /** One-time import of the sessions that predate the store. */
 async function importPiSessions(): Promise<void> {
@@ -1835,8 +1845,26 @@ async function btwPrompt(message: string): Promise<{ text: string; settled: bool
   return { text: settled ? '（没有回答）' : '（超过 5 分钟仍未结束，可以关闭窗口）', settled }
 }
 
+/**
+ * Does the model this engine is parked on accept images?
+ *
+ * Engines take images (pi, Prophey, Claude, Codex all do), but the model is a separate question:
+ * pi's catalog reads a missing `input` as text-only and replaces every image with
+ * "(image omitted: model does not support images)", so the screenshot never reaches the model.
+ */
+async function modelAcceptsImages(owner: AgentEngine): Promise<boolean> {
+  const model = owner.state().model
+  if (!model?.provider || !model.id) return false
+  try {
+    return await providers.modelSupportsImages(model.provider, model.id)
+  } catch {
+    // A broken catalog is not a reason to claim the model supports images.
+    return false
+  }
+}
+
 /** The engine owns the turn; the app only forwards the window's request. */
-function submitPrompt(
+async function submitPrompt(
   message: string,
   behavior?: 'steer' | 'followUp',
   images?: PromptImage[],
@@ -1844,9 +1872,22 @@ function submitPrompt(
 ): Promise<PromptResult> {
   const caps = owner.capabilities()
   if (images?.length && !caps.images)
-    return Promise.resolve({ ok: false, error: '当前引擎不支持图片' })
+    return { ok: false, error: '当前引擎不支持图片' }
+  // Refuse rather than let the picture be replaced by a placeholder: the user keeps the draft and
+  // gets told which switch turns the screenshot back on. Only engines that send through pi's model
+  // catalog are affected — Claude Code and Codex hand images to their own CLI.
+  if (images?.length && caps.imageInput === 'model' && !(await modelAcceptsImages(owner))) {
+    const model = owner.state().model
+    return {
+      ok: false,
+      error:
+        `当前模型（${model?.provider ?? '?'} / ${model?.id ?? '?'}）没有声明支持图片，` +
+        '发送时截图会被替换成“(image omitted)”，模型看不到。到 设置 → 服务商 → 编辑该模型，' +
+        '勾选「支持图片」后重新发送。'
+    }
+  }
   if (behavior === 'steer' && owner.busy() && !caps.steer)
-    return Promise.resolve({ ok: false, error: '当前引擎不支持运行中引导，请排队发送' })
+    return { ok: false, error: '当前引擎不支持运行中引导，请排队发送' }
   const firstRequest = owner === currentEngine && !conversationStarted && owner.running() && Boolean(message.trim() || images?.length)
   const titleModel = owner.state().model ? { ...owner.state().model! } : undefined
   if (owner === currentEngine && owner.running() && (message.trim() || images?.length)) {
@@ -2418,6 +2459,24 @@ function registerIpc(): void {
   })
 
   handle('app:copy-image', (_event, dataUrl: unknown) => copyImageToClipboard(dataUrl))
+
+  // The renderer's own copy lives in localStorage; these two mirror it to disk so a crash cannot
+  // swallow the last seconds of typing (localStorage's LevelDB commit is batched, see
+  // composer-store.ts). `load` hands back the mirrored map for the startup merge.
+  handle('composer:save', async (_event, key: unknown, entry: unknown) => {
+    if (typeof key !== 'string' || !entry || typeof entry !== 'object') return
+    const value = entry as {
+      draft?: unknown; images?: unknown; queued?: unknown; at?: unknown; imagesChanged?: unknown
+    }
+    composerStore.save(key, {
+      draft: typeof value.draft === 'string' ? value.draft : '',
+      images: Array.isArray(value.images) ? value.images : undefined,
+      imagesChanged: value.imagesChanged !== false,
+      queued: Array.isArray(value.queued) ? value.queued : [],
+      at: typeof value.at === 'number' ? value.at : Date.now()
+    })
+  })
+  handle('composer:load', () => composerStore.loadRaw())
 
   handle('app:open-external', async (_event, url: string) => {
     if (/^https?:\/\//i.test(url)) await shell.openExternal(url)
@@ -3426,6 +3485,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   shuttingDown = true
+  // Synchronous on purpose: a pending draft is worthless if the process exits before fs finishes.
+  composerStore.flushSync()
   bridge.cancelAllAsks('桌面端已退出')
   for (const slot of parkedEngines.values()) slot.engine.dispose()
   parkedEngines.clear()

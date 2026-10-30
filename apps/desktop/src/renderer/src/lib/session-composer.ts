@@ -1,6 +1,7 @@
 import type { DraftImage } from './images'
 import type { QueuedMessage } from './chat-types'
 import { pathKey } from './session-groups'
+import { isVideo } from './video'
 
 /**
  * Composer state that belongs to one conversation.
@@ -28,6 +29,21 @@ export function composerKey(sessionPath?: string): string {
   return sessionPath ? pathKey(sessionPath) : LOCAL_COMPOSER_KEY
 }
 
+/** Only renderer-owned image drafts are persisted, never raw video data or temporary URLs. */
+function savedImages(value: unknown): DraftImage[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is DraftImage => {
+    if (!item || typeof item !== 'object') return false
+    const image = item as Partial<DraftImage>
+    return typeof image.id === 'string' && typeof image.data === 'string' &&
+      (typeof image.mimeType !== 'string' || image.mimeType.startsWith('image/')) &&
+      !isVideo({ name: typeof image.name === 'string' ? image.name : '', type: image.mimeType ?? '' })
+  }).map(image => ({
+    ...image,
+    mimeType: image.mimeType.startsWith('image/') ? image.mimeType : 'image/png'
+  }))
+}
+
 export const EMPTY_COMPOSER: SessionComposer = { draft: '', images: [], queued: [] }
 
 /** The composer of `key`, never undefined, and never the stored object itself. */
@@ -36,7 +52,7 @@ export function composerFor(map: SessionComposerMap, key: string): SessionCompos
   if (!entry) return EMPTY_COMPOSER
   return {
     draft: typeof entry.draft === 'string' ? entry.draft : '',
-    images: Array.isArray(entry.images) ? entry.images : [],
+    images: savedImages(entry.images),
     queued: Array.isArray(entry.queued) ? entry.queued : [],
     ...(typeof entry.at === 'number' ? { at: entry.at } : {})
   }
@@ -84,6 +100,23 @@ export function adoptComposer(
   return { ...rest, [to]: source }
 }
 
+/**
+ * Pick the newer copy of each session's composer.
+ *
+ * The renderer keeps drafts in `localStorage` (synchronous on the first paint) and the main process
+ * mirrors them to disk with `fs` (durable through a crash, see `composer-store.ts`). After a crash
+ * those two disagree: localStorage lost whatever Chromium had not committed, the mirror kept it. Both
+ * sides stamp `at`, so the newer copy wins per session and nothing has to be thrown away wholesale.
+ */
+export function mergeComposers(local: SessionComposerMap, saved: SessionComposerMap): SessionComposerMap {
+  const merged: SessionComposerMap = { ...local }
+  for (const [key, entry] of Object.entries(saved)) {
+    const current = merged[key]
+    if (!current || (entry.at ?? 0) > (current.at ?? 0)) merged[key] = entry
+  }
+  return merged
+}
+
 /** Drop empty entries and keep the newest `limit`, so storage cannot grow without bound. */
 export function pruneComposers(map: SessionComposerMap, limit = 60): SessionComposerMap {
   const kept = Object.entries(map)
@@ -115,8 +148,8 @@ export function parseComposers(raw: string | null | undefined): SessionComposerM
     )
     map[composerKey(key)] = {
       draft: typeof entry.draft === 'string' ? entry.draft : '',
-      images: Array.isArray(entry.images) ? (entry.images as DraftImage[]) : [],
-      queued: queued.map((item) => ({ ...item, images: Array.isArray(item.images) ? item.images : [] })),
+      images: savedImages(entry.images),
+      queued: queued.map((item) => ({ ...item, images: savedImages(item.images) })),
       at: typeof entry.at === 'number' ? entry.at : 0
     }
   }

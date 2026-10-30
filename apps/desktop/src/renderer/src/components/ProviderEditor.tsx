@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ProviderInfo } from '@shared/types'
+import { declaresImageInput } from '@shared/model-input'
+import { buildProviderModels, emptyModel, type ModelDraft } from '../lib/provider-models'
 import { CheckIcon, CloseIcon, ExternalIcon, PlusIcon, TrashIcon } from './Icons'
 
 const API_TYPES = [
@@ -29,15 +31,6 @@ interface ProviderRow {
   raw: RawProvider
 }
 
-interface ModelDraft {
-  id: string
-  name: string
-  contextWindow: string
-  maxTokens: string
-  reasoning: boolean
-  raw?: Record<string, unknown>
-}
-
 interface ProviderDraft {
   originalId?: string
   id: string
@@ -46,10 +39,6 @@ interface ProviderDraft {
   api: string
   apiKey: string
   models: ModelDraft[]
-}
-
-function emptyModel(): ModelDraft {
-  return { id: '', name: '', contextWindow: '', maxTokens: '', reasoning: false }
 }
 
 function toDraft(provider: ProviderRow): ProviderDraft {
@@ -69,6 +58,7 @@ function toDraft(provider: ProviderRow): ProviderDraft {
               typeof model.contextWindow === 'number' ? String(model.contextWindow) : '',
             maxTokens: typeof model.maxTokens === 'number' ? String(model.maxTokens) : '',
             reasoning: Boolean(model.reasoning),
+            images: declaresImageInput(model.input),
             raw: model
           }))
         : [emptyModel()]
@@ -212,20 +202,7 @@ export function ProviderEditor({
       )
       return
     }
-    const models = draft.models
-      .filter((model) => model.id.trim())
-      .map((model) => {
-        const existing = (model.raw ?? {}) as Record<string, unknown>
-        return {
-          ...existing,
-          id: model.id.trim(),
-          name: model.name.trim() || undefined,
-          contextWindow: model.contextWindow ? Number(model.contextWindow) : undefined,
-          maxTokens: model.maxTokens ? Number(model.maxTokens) : undefined,
-          reasoning: model.reasoning,
-          cost: existing.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
-        }
-      })
+    const models = buildProviderModels(draft.models)
     const existingProvider = draft.originalId
       ? parsed.list.find((provider) => provider.id === draft.originalId)?.raw ?? {}
       : {}
@@ -451,6 +428,17 @@ export function ProviderEditor({
                         }
                       />
                       推理
+                    </label>
+                    <label
+                      className="model-reasoning"
+                      title="勾选后把图片按 base64 发给模型；不勾选时 pi 会把截图替换成“image omitted”，模型看不到"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={model.images}
+                        onChange={(event) => updateModel(index, { images: event.target.checked })}
+                      />
+                      支持图片
                     </label>
                     <button
                       className="icon-btn"

@@ -27,6 +27,8 @@ jobs:
         run: npm run build
       - name: Electron smoke test
         run: npm run test:smoke
+      - name: Draft survives a crash
+        run: npm run test:crash
       - name: Context handoff smoke test
         run: npm run test:handoff
       - name: Package installer

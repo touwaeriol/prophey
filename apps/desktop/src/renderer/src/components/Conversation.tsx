@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { SubagentView } from '@shared/types'
 import type { ChatItem, ToolCallView } from '../lib/messages'
 import { Markdown } from './Markdown'
@@ -200,7 +200,7 @@ function Message({
         {item.images && item.images.length > 0 && (
           <MessageImages images={item.images} align="end" />
         )}
-        {item.text && <div className="user-bubble">{item.text}</div>}
+        {item.text && <UserBubble text={item.text} />}
       </article>
     )
   }
@@ -242,6 +242,62 @@ const SUGGESTIONS = [
   '为当前改动写一份提交信息',
   '解释 src 里最关键的一条调用链'
 ]
+
+/**
+ * The user's own message: pasted logs and specs are legitimately long, and a hundred-line bubble
+ * pushes the answer it was asking for off screen. The bubble keeps the beginning and offers the rest.
+ *
+ * Whether it overflows is measured, not guessed from a character count: the same text wraps
+ * differently at every window width, and a clamp on short text would hide the tail of a one-liner.
+ * The measurement always happens in the clamped state (`overflowing` is left alone while expanded),
+ * so the toggle cannot disappear from under the cursor that just clicked it.
+ */
+function UserBubble({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  const measure = (): void => {
+    const node = ref.current
+    if (!node || expanded) return
+    const next = node.scrollHeight > node.clientHeight + 2
+    setOverflowing((previous) => (previous === next ? previous : next))
+  }
+
+  useLayoutEffect(() => {
+    measure()
+  }, [text, expanded])
+
+  // A wider window can make the same message fit; a narrower one can start clipping it.
+  useLayoutEffect(() => {
+    const node = ref.current
+    if (!node || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => measure())
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [text, expanded])
+
+  return (
+    <div
+      className={[
+        'user-bubble',
+        expanded ? 'expanded' : '',
+        overflowing ? 'overflowing' : ''
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <div className="user-bubble-text" ref={ref}>
+        {text}
+      </div>
+      {overflowing && (
+        <button className="user-bubble-toggle" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? '收起' : '展开全部'}
+        </button>
+      )}
+    </div>
+  )
+}
 
 export function Conversation({
   items,

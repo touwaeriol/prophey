@@ -195,7 +195,9 @@ export function DraftImageStrip({
           <button
             className="draft-image-thumb"
             onClick={() => onPreview(image)}
-            title="点击查看大图"
+            title={image.video
+              ? `${image.name} · ${image.video.time.toFixed(1)} 秒`
+              : image.name ? `查看大图：${image.name}` : '点击查看大图'}
           >
             <img src={imageSrc(image)} alt="" />
           </button>

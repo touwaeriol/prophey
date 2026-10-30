@@ -5,7 +5,7 @@ const os = require('node:os')
 const path = require('node:path')
 const esbuild = require('esbuild')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'prophey-renderer-tests-'))
-for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'session-scroll', 'actions', 'subagents', 'layout-prefs']) {
+for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'session-scroll', 'actions', 'subagents', 'layout-prefs', 'video']) {
   esbuild.buildSync({ entryPoints: [path.resolve(__dirname, '../apps/desktop/src/renderer/src/lib', name + '.ts')], outfile: path.join(temp, name + '.cjs'), bundle: true, platform: 'node', format: 'cjs' })
 }
 after(() => fs.rmSync(temp, { recursive: true, force: true }))
@@ -15,6 +15,24 @@ const { insertFileMention } = require(path.join(temp, 'composer.cjs'))
 const { SIDEBAR_OPEN_KEY, PANEL_OPEN_KEY, readLayoutFlag, writeLayoutFlag } = require(path.join(temp, 'layout-prefs.cjs'))
 const { rememberScroll, recallScroll, restoreScroll, STICK_DISTANCE } = require(path.join(temp, 'session-scroll.cjs'))
 const event = (items, type, fields = {}) => apply(items, { type, ...fields }, 123)
+const { isVideo, videoTimes, videoFramePrompt } = require(path.join(temp, 'video.cjs'))
+
+test('renderer: video input samples its timeline and tells the model the frames have no audio', () => {
+  assert.equal(isVideo({ name: 'demo.mp4', type: '' }), true)
+  assert.equal(isVideo({ name: 'clip', type: 'video/webm' }), true)
+  assert.equal(isVideo({ name: 'photo.png', type: 'image/png' }), false)
+  assert.deepEqual(videoTimes(12), [0, 2.39, 4.78, 7.17, 9.56, 11.95])
+  assert.deepEqual(videoTimes(0), [0])
+  const frames = videoTimes(12).map((time, index) => ({
+    id: `frame-${index}`, data: 'jpeg', mimeType: 'image/jpeg',
+    video: { name: 'demo.mp4', duration: 12, index, count: 6, time }
+  }))
+  const prompt = videoFramePrompt([{ id: 'photo', data: 'png', mimeType: 'image/png' }, ...frames])
+  assert.match(prompt, /用户上传的是视频/)
+  assert.match(prompt, /不包含音轨/)
+  assert.match(prompt, /第 6 帧：11\.9 秒/)
+  assert.equal(videoFramePrompt([{ id: 'photo', data: 'png', mimeType: 'image/png' }]), '')
+})
 
 test('renderer: native string messages survive both streaming and session restore', () => {
   const message = { role: 'assistant', content: 'native response' }

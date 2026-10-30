@@ -8,6 +8,11 @@ export interface EngineCapabilities {
   thinking: boolean
   models: boolean
   images: boolean
+  /**
+   * Who decides whether an image can go out: `model` = the model entry's declared modalities
+   * (pi and Prophey share pi's catalog), `native` = the CLI owns it (Claude Code, Codex).
+   */
+  imageInput: 'model' | 'native'
   steer: boolean
   mcp: 'managed' | 'native'
   providerSettings: boolean
@@ -41,6 +46,7 @@ export function engineCapabilities(id: EngineId): EngineCapabilities {
     thinking: true,
     models: true,
     images: true,
+    imageInput: cli ? 'native' : 'model',
     // Steering is what Enter does mid-run; Claude Code's SDK has no mid-turn injection, so it queues.
     steer: id !== 'claude',
     mcp: cli ? 'native' : 'managed',

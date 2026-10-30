@@ -60,6 +60,8 @@ Tagging `v*` runs `.github/workflows/release.yml`, which builds the Windows inst
 
 Paste or drop images into the composer. Images remain attachments in a thumbnail strip; no filename or marker is inserted into the message text. Click a thumbnail to preview it or remove it before sending. Sent images are retained by the selected engine and displayed in the transcript.
 
+Images only reach a model that declares image input. For a model you added by hand in `models.json`, tick 「支持图片」 in 设置 → 服务商 → 该模型; otherwise pi sends the text `(image omitted: model does not support images)` instead of the picture, and the desktop now refuses the send with that explanation rather than letting the screenshot vanish.
+
 ## Sessions
 
 The default Prophey engine stores transcripts under the desktop user-data directory.

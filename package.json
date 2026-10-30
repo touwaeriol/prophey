@@ -1,7 +1,7 @@
 {
   "name": "prophey",
   "private": true,
-  "version": "0.6.15",
+  "version": "0.6.16",
   "description": "Prophey — a coding agent desktop client",
   "author": "eriol touwa",
   "workspaces": [
@@ -17,6 +17,7 @@
     "release": "npm run release -w @prophey/desktop",
     "typecheck": "npm run typecheck -w @prophey/desktop",
     "test:smoke": "node scripts/smoke-electron.cjs",
-    "test:handoff": "node scripts/test-handoff.cjs"
+    "test:handoff": "node scripts/test-handoff.cjs",
+    "test:crash": "node scripts/test-composer-crash.cjs"
   }
 }

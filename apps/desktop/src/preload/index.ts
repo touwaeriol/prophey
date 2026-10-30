@@ -79,6 +79,9 @@ const bridge: PiBridge = {
   openAgentDir: () => ipcRenderer.invoke('pi:open-agent-dir') as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url) as Promise<void>,
   copyImage: (dataUrl: string) => ipcRenderer.invoke('app:copy-image', dataUrl),
+  saveComposer: (key: string, entry: unknown) =>
+    ipcRenderer.invoke('composer:save', key, entry) as Promise<void>,
+  loadComposers: () => ipcRenderer.invoke('composer:load') as Promise<string | null>,
   setTheme: (theme: 'dark' | 'light') =>
     ipcRenderer.invoke('app:set-theme', theme) as Promise<void>,
   listModels: () => ipcRenderer.invoke('pi:list-models'),

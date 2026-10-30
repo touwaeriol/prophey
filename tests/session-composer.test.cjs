@@ -84,6 +84,22 @@ test('composer: malformed storage is ignored instead of breaking the window', ()
   assert.deepEqual(composer.parseComposers('{"a":{"queued":[{"text":"no id"}]}}')['a'].queued, [])
 })
 
+test('composer: video drafts persist only extracted image frames', () => {
+  const raw = JSON.stringify({ a: {
+    draft: 'recognize this',
+    images: [
+      { id: 'frame', data: 'jpeg', mimeType: 'image/jpeg', video: { name: 'demo.mp4', duration: 2, index: 0, count: 1, time: 0 } },
+      { id: 'raw-video', data: 'mp4-bytes', mimeType: 'video/mp4' },
+      { id: 'broken', data: null }
+    ],
+    queued: [{ id: 'q', text: '', images: [{ id: 'raw', data: 'mp4-bytes', mimeType: 'video/mp4' }] }]
+  } })
+  const restored = composer.parseComposers(raw).a
+  assert.equal(restored.images.length, 1)
+  assert.equal(restored.images[0].video.name, 'demo.mp4')
+  assert.deepEqual(restored.queued[0].images, [])
+})
+
 test('composer: pruning keeps the newest entries only', () => {
   let map = {}
   for (let index = 0; index < 5; index += 1) {
@@ -91,4 +107,25 @@ test('composer: pruning keeps the newest entries only', () => {
   }
   const pruned = composer.pruneComposers(map, 2)
   assert.deepEqual(Object.keys(pruned).sort(), ['s3.jsonl', 's4.jsonl'])
+})
+
+test('composer: the newer of localStorage and the on-disk mirror wins per session', () => {
+  // After a crash these two disagree: Chromium had not committed localStorage yet, the main process
+  // had already written the file. Merging by `at` keeps the draft the user actually typed, and never
+  // lets a stale copy overwrite a newer one in the other session.
+  const local = composer.parseComposers(JSON.stringify({
+    'a.jsonl': { draft: 'stale text', images: [], queued: [], at: 10 },
+    'b.jsonl': { draft: 'newest b', images: [], queued: [], at: 99 }
+  }))
+  const mirrored = composer.parseComposers(JSON.stringify({
+    'a.jsonl': { draft: 'survived the crash', images: [], queued: [], at: 50 },
+    'b.jsonl': { draft: 'older b', images: [], queued: [], at: 20 },
+    'c.jsonl': { draft: 'only on disk', images: [], queued: [], at: 5 }
+  }))
+  const merged = composer.mergeComposers(local, mirrored)
+  assert.equal(merged['a.jsonl'].draft, 'survived the crash')
+  assert.equal(merged['b.jsonl'].draft, 'newest b')
+  assert.equal(merged['c.jsonl'].draft, 'only on disk')
+  // An entry the mirror lacks (typed after the last mirror) must not be dropped.
+  assert.equal(composer.mergeComposers(local, {})['b.jsonl'].draft, 'newest b')
 })
