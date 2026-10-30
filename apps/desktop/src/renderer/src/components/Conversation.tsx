@@ -2,10 +2,12 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import type { SubagentView } from '@shared/types'
 import type { ChatItem, MessageImage, ToolCallView } from '../lib/messages'
 import { Markdown } from './Markdown'
-import { MessageImages } from './ImageLightbox'
-import { ChevronIcon, PencilIcon, SparkIcon, ToolIcon } from './Icons'
+import { DraftImageStrip, ImageLightbox, MessageImages } from './ImageLightbox'
+import { ChevronIcon, PaperclipIcon, PencilIcon, SparkIcon, ToolIcon } from './Icons'
 import { SUBAGENT_STATUS_LABELS, isSubagentRunning } from '../lib/subagents'
 import { usageMeter } from '../lib/context-usage'
+import { imageSrc, type DraftImage } from '../lib/images'
+import { useDraftImages } from '../hooks/useDraftImages'
 
 /** The desktop tool that starts a run: these get a card of their own instead of a generic row. */
 function isSubagentStart(name: string): boolean {
@@ -188,11 +190,10 @@ function Message({
   item: ChatItem
   /** Position among user turns, or -1 for a bubble that is not a settled user message. */
   userIndex: number
-  onEditTurn: (index: number, text: string, images?: MessageImage[]) => void
+  onEditTurn: (index: number, text: string, images: DraftImage[]) => void
   subagents: SubagentView[]
   onOpenSubagent: (id?: string) => void
-}) {
-  if (item.role === 'system') {
+}) {  if (item.role === 'system') {
     return (
       <article className="message system" data-message-id={item.id}>
         <div className="system-notice">
@@ -304,8 +305,9 @@ function UserBubble({ text }: { text: string }) {
  * One of the user's own messages, with the edit affordance.
  *
  * Editing rewrites history: the engine drops everything from this turn on and the edited text is
- * sent in its place, so the editor says so out loud. Images stay attached — an edit changes the
- * words, not what was attached to them.
+ * sent in its place, so the editor says so out loud. Attachments work exactly like the composer's
+ * (same hook: paste, drop, pick, remove, video frames) — an edit may rewrite what was attached too,
+ * and a user who can add a picture in one box but not the other would rightly call that a bug.
  */
 function UserMessage({
   item,
@@ -314,30 +316,61 @@ function UserMessage({
 }: {
   item: ChatItem
   index: number
-  onEditTurn: (index: number, text: string, images?: MessageImage[]) => void
+  onEditTurn: (index: number, text: string, images: DraftImage[]) => void
 }) {
   const [draft, setDraft] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<DraftImage[]>([])
+  const [preview, setPreview] = useState<DraftImage>()
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const { convertingVideos, dragging, handleFiles, removeImage, dropProps } = useDraftImages({
+    images: attachments,
+    onImagesChange: setAttachments,
+    input: inputRef
+  })
   const editing = draft !== null
   // A bubble that has not settled (still being delivered) is not in the engine's history yet.
   const editable = index >= 0 && !item.pending
-  const canSend = draft !== null && (draft.trim().length > 0 || (item.images?.length ?? 0) > 0)
+  const canSend = draft !== null && (draft.trim().length > 0 || attachments.length > 0)
+
+  const open = (): void => {
+    setDraft(item.text)
+    // The message's own pictures start in the editor, as attachments that can be removed or added to.
+    setAttachments(
+      (item.images ?? []).map((image, at) => ({ id: `edit-${at}`, data: image.data, mimeType: image.mimeType }))
+    )
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  const close = (): void => {
+    setDraft(null)
+    setAttachments([])
+  }
 
   const submit = (): void => {
     if (!canSend) return
     const text = draft.trim()
-    setDraft(null)
-    onEditTurn(index, text, item.images)
+    const images = attachments
+    close()
+    onEditTurn(index, text, images)
   }
 
   return (
     <article className={`message user ${item.pending ? 'pending' : ''}`} data-message-id={item.id}>
-      {item.images && item.images.length > 0 && (
+      {!editing && item.images && item.images.length > 0 && (
         <MessageImages images={item.images} align="end" />
       )}
       {editing ? (
-        <div className="user-edit">
+        <div className={`user-edit ${dragging ? 'dragging' : ''}`} {...dropProps}>
+          <DraftImageStrip images={attachments} onRemove={removeImage} onPreview={setPreview} />
+          {convertingVideos > 0 && (
+            <div className="video-converting" role="status">
+              正在本地抽取关键帧…视频不会原样上传，暂不支持音轨识别
+            </div>
+          )}
           <textarea
             className="user-edit-input"
+            ref={inputRef}
             value={draft}
             rows={Math.min(8, Math.max(2, draft.split('\n').length))}
             autoFocus
@@ -345,21 +378,48 @@ function UserMessage({
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 event.preventDefault()
-                setDraft(null)
+                close()
                 return
               }
               // Enter sends, Shift+Enter breaks the line — the composer's own contract.
               if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
               event.preventDefault()
+              if (convertingVideos > 0) return
               submit()
             }}
           />
           <div className="user-edit-actions">
+            <input
+              ref={fileRef}
+              className="attachment-input"
+              type="file"
+              accept="image/*,video/mp4,video/webm,video/quicktime,video/ogg,.mkv"
+              multiple
+              tabIndex={-1}
+              aria-hidden
+              onChange={(event) => {
+                handleFiles(Array.from(event.target.files ?? []))
+                event.target.value = ''
+              }}
+            />
+            <button
+              className="user-edit-attach"
+              disabled={convertingVideos > 0}
+              title="添加图片或视频（视频本地抽帧，不含音轨；也可以直接粘贴或拖入）"
+              aria-label="添加图片或视频"
+              onClick={() => fileRef.current?.click()}
+            >
+              <PaperclipIcon size={13} />
+            </button>
             <span className="user-edit-hint">发送后，这条之后的对话会被丢弃</span>
-            <button className="user-edit-btn ghost" onClick={() => setDraft(null)}>
+            <button className="user-edit-btn ghost" onClick={close}>
               取消
             </button>
-            <button className="user-edit-btn primary" disabled={!canSend} onClick={submit}>
+            <button
+              className="user-edit-btn primary"
+              disabled={!canSend || convertingVideos > 0}
+              onClick={submit}
+            >
               重新发送
             </button>
           </div>
@@ -371,11 +431,14 @@ function UserMessage({
         <button
           className="user-edit-open"
           title="编辑这条并从它重新发送（后面的对话会被丢弃）"
-          onClick={() => setDraft(item.text)}
+          onClick={open}
         >
           <PencilIcon size={11} />
           编辑
         </button>
+      )}
+      {preview && (
+        <ImageLightbox src={imageSrc(preview)} alt={preview.name} onClose={() => setPreview(undefined)} />
       )}
     </article>
   )
@@ -399,7 +462,7 @@ export function Conversation({
   onOpenSubagent: (id?: string) => void
   onSuggestion: (text: string) => void
   /** Rewrite history from the `index`-th user message and send it again. */
-  onEditTurn: (index: number, text: string, images?: MessageImage[]) => void
+  onEditTurn: (index: number, text: string, images: DraftImage[]) => void
 }) {
   if (items.length === 0) {
     return (

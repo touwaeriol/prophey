@@ -48,7 +48,7 @@ import {
 } from './lib/session-composer'
 import { PANEL_OPEN_KEY, SIDEBAR_OPEN_KEY, SIDEBAR_WIDTH_KEY, readLayoutFlag, readLayoutNumber, writeLayoutFlag, writeLayoutNumber } from './lib/layout-prefs'
 import { updateStatusText } from './lib/updates'
-import { toChatItems, type ChatItem, type MessageImage } from './lib/messages'
+import { toChatItems, type ChatItem } from './lib/messages'
 import { videoFramePrompt } from './lib/video'
 import { messagesBelong } from './lib/session-messages'
 import {
@@ -1068,7 +1068,7 @@ export default function App(): React.JSX.Element {
    * it back by re-reading the engine's own transcript (which still has the old turns).
    */
   const editTurn = useCallback(
-    async (index: number, text: string, images?: MessageImage[]): Promise<void> => {
+    async (index: number, text: string, images: DraftImage[] = []): Promise<void> => {
       const owner = activeComposerKey
       if (statusRef.current.switchingEngine || owner !== composerKeyRef.current) return
       setStick(true)
@@ -1082,11 +1082,13 @@ export default function App(): React.JSX.Element {
         })
         return at < 0 ? prev : prev.slice(0, at)
       })
+      // Same rule as a fresh send: video frames travel as plain images plus a line that says so.
+      const promptText = [videoFramePrompt(images), text].filter(Boolean).join('\n\n')
       const result = await window.pi
         .editTurn(
           index,
-          text,
-          (images ?? []).map((image) => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType })),
+          promptText,
+          images.map((image) => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType })),
           owner
         )
         .catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))

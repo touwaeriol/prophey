@@ -19,9 +19,9 @@ import { DraftImageStrip, ImageLightbox } from './ImageLightbox'
 import { insertFileMention } from '../lib/composer'
 import { contextLabel } from '../lib/context-usage'
 import { useDismissable } from '../hooks/useDismissable'
+import { useDraftImages } from '../hooks/useDraftImages'
 import type { QueuedMessage } from '../lib/chat-types'
-import { blobToDraftImage, clipboardImages, imageSrc, type DraftImage } from '../lib/images'
-import { extractVideoFrames, isVideo } from '../lib/video'
+import { imageSrc, type DraftImage } from '../lib/images'
 
 const THINKING_LABELS: Record<string, string> = {
   off: '关闭',
@@ -119,7 +119,17 @@ export function Composer({
   const pickerRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [convertingVideos, setConvertingVideos] = useState(0)
+  /**
+   * Attachments come from the shared hook so the composer and the history editor behave the same way
+   * (same paste, same drop, same video frames). Only the text input itself is composer-specific.
+   */
+  const { convertingVideos, dragging, handleFiles, removeImage, dropProps } = useDraftImages({
+    images,
+    onImagesChange,
+    onNotice,
+    disabled,
+    input: ref
+  })
   const [modelOpen, setModelOpen] = useState(false)
   const [models, setModels] = useState<ModelOption[]>([])
   const [modelQuery, setModelQuery] = useState('')
@@ -133,7 +143,6 @@ export function Composer({
   const [speedBusy, setSpeedBusy] = useState(false)
   const [speedError, setSpeedError] = useState<string>()
   const [preview, setPreview] = useState<DraftImage>()
-  const [dragging, setDragging] = useState(false)
   /**
    * A prediction is only shown while it could be what the user is already typing: an empty draft, or
    * a strict prefix of the suggestion. Once the draft diverges it is wrong, so it disappears —
@@ -182,89 +191,6 @@ export function Composer({
       element.setSelectionRange(next.length, next.length)
     })
   }
-
-  /**
-   * Latest draft images, so two pastes that are still decoding do not both append to the same
-   * stale array. `images` from props would be captured by the first `addImages` call.
-   */
-  const imagesRef = useRef(images)
-  useEffect(() => {
-    imagesRef.current = images
-  }, [images])
-
-  const addImages = useCallback(
-    async (files: File[]): Promise<void> => {
-      for (const file of files) {
-        let added: DraftImage[] = []
-        if (isVideo(file)) {
-          setConvertingVideos(count => count + 1)
-          try {
-            added = await extractVideoFrames(file)
-          } catch (error) {
-            onNotice?.(error instanceof Error ? error.message : String(error))
-          } finally {
-            setConvertingVideos(count => Math.max(0, count - 1))
-          }
-        } else {
-          const image = await blobToDraftImage(file, file.name || undefined)
-          if (!image) onNotice?.('图片超过 8MB，已跳过')
-          else added = [image]
-        }
-        if (added.length === 0) continue
-        // Read the ref after every await: concurrent decoding and session changes must not make
-        // one async result overwrite the other attachments or restore images already sent.
-        const next = [...imagesRef.current, ...added]
-        imagesRef.current = next
-        onImagesChange(next)
-      }
-    },
-    [onImagesChange, onNotice]
-  )
-
-  /** Same reason as `addImages`: two removals in one tick must not both start from stale props. */
-  const removeImage = useCallback(
-    (id: string): void => {
-      const next = imagesRef.current.filter((image) => image.id !== id)
-      imagesRef.current = next
-      onImagesChange(next)
-    },
-    [onImagesChange]
-  )
-
-  const handleFiles = useCallback(
-    (files: File[]): void => {
-      // Nothing may be attached while pi is not accepting prompts (or a `/btw` fork is open).
-      // Say so instead of dropping the paste: the image is gone from the clipboard by then.
-      if (disabled) {
-        onNotice?.('现在不能添加图片或视频：pi 未就绪，或侧边提问窗口还开着')
-        return
-      }
-      void addImages(files)
-    },
-    [addImages, disabled, onNotice]
-  )
-
-  /**
-   * Clipboard images are pure attachments: an image in the clipboard is attached instead of being
-   * inserted as text. Listening on the window (not just the textarea) keeps Cmd/Ctrl+V working when
-   * focus sits on a chip or the scroll area; pastes into other inputs (settings, @-mention search)
-   * are left alone.
-   */
-  useEffect(() => {
-    const onPaste = (event: ClipboardEvent): void => {
-      const target = event.target as HTMLElement | null
-      const editable =
-        target instanceof HTMLElement &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      if (editable && target !== ref.current) return
-      const files = clipboardImages(event.clipboardData)
-      if (files.length === 0) return
-      event.preventDefault()
-      handleFiles(files)
-    }
-    window.addEventListener('paste', onPaste)
-    return () => window.removeEventListener('paste', onPaste)
-  }, [handleFiles])
 
   const openContextPicker = async (): Promise<void> => {
     if (contextOpen) {
@@ -519,24 +445,7 @@ export function Composer({
       )}
       <div
         className={`composer ${disabled ? 'disabled' : ''} ${dragging ? 'dragging' : ''}`}
-        onDragOver={(event) => {
-          if (!event.dataTransfer.types.includes('Files')) return
-          event.preventDefault()
-          setDragging(true)
-        }}
-        onDragLeave={(event) => {
-          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
-          setDragging(false)
-        }}
-        onDrop={(event) => {
-          const files = Array.from(event.dataTransfer.files).filter((file) =>
-            file.type.startsWith('image/') || isVideo(file)
-          )
-          if (files.length === 0) return
-          event.preventDefault()
-          setDragging(false)
-          handleFiles(files)
-        }}
+        {...dropProps}
       >
         {slashMatches.length > 0 && (
           <div className="slash-menu">

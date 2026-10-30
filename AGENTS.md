@@ -155,7 +155,8 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 ## 改写历史（编辑旧消息并重发）
 
 - 入口：用户气泡 hover 时右上角的「编辑」（`.user-edit-open`，`Conversation.tsx` 的 `UserMessage`）。点开变成 `.user-edit` 输入框，`Enter` 发送 / `Shift+Enter` 换行（和输入框同一套手感）/ `Esc` 取消；提示文字就是代价——「发送后，这条之后的对话会被丢弃」。**不弹二次确认**（用户明确要求：直接截断重发）。
-- 语义就是「从这条重发」：该用户消息之后的 transcript 全部丢弃，改后的文本接在它原来的位置发送。图片保持不变（编辑改的是文字，不是附件）。
+- 语义就是「从这条重发」：该用户消息之后的 transcript 全部丢弃，改后的文本接在它原来的位置发送。
+- **附件和输入框完全统一**（用户要求，别两边各写一套）：两处都走 `hooks/useDraftImages.ts` —— 同一个粘贴（window 上的 paste 监听，只认自己那个 textarea）、同一个拖入、同一个 `PaperclipIcon` 选择器、同一个 8MB 限制与视频抽帧、同一个 `DraftImageStrip`（缩略图点开 `ImageLightbox`、右上角 × 移除）。编辑时把原消息自带的图片转成 `DraftImage` 放进条带（`id: edit-N`），所以旧图**能删**、新图**能加**，图片不只是只读展示。提交时和 `deliver()` 一样拼 `videoFramePrompt()` 前缀（`App.editTurn`），否则编辑后新增的视频帧会丢掉那段说明。
 - **索引是「第几条用户消息」**，不是数组下标：渲染层 `Conversation` 在 map 时数 `role === 'user'` 且 `!pending` 的条目得到 `userIndex`（未收尾的气泡给 `-1`，不给编辑入口），主进程再把这个序号交给引擎。引擎侧自己数自己的 user turn，两边只约定「按顺序数用户消息」这一件事，不靠 id 对齐。
 - **IPC `pi:edit-turn`**：引擎支持就先 `abort()` + `waitForIdle()`（用户在跑着的时候点编辑，不用先手动停），然后 `rewind(index)`，成功后再走唯一的发送入口 `submitPrompt()`。渲染层**先本地切掉**那条及其之后的消息（立刻看到新形状），失败时 `loadMessages()` 以引擎的 transcript 为准恢复。
 - 引擎实现：

@@ -1,7 +1,7 @@
 {
   "name": "prophey",
   "private": true,
-  "version": "0.6.20",
+  "version": "0.6.21",
   "description": "Prophey — a coding agent desktop client",
   "author": "eriol touwa",
   "workspaces": [

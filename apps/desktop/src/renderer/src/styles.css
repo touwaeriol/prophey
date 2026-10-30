@@ -1427,6 +1427,40 @@ body.resizing-sidebar * {
   background: var(--accent-soft);
 }
 
+/* Attachments in the editor are the composer's strip, so only the spacing is local. */
+.user-edit .draft-images {
+  margin-bottom: 2px;
+}
+
+.user-edit .video-converting {
+  font-size: 10.2px;
+}
+
+.user-edit.dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.user-edit-attach {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--border-soft);
+  color: var(--faint);
+}
+
+.user-edit-attach:hover:not(:disabled) {
+  border-color: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.user-edit-attach:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .assistant-avatar {
   flex: 0 0 22px;
   width: 22px;

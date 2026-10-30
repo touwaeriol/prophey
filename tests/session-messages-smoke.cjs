@@ -8,7 +8,13 @@ const assert = require('node:assert/strict')
 module.exports = async function sessionMessagesSmoke(evaluate, until, window, setSessionFixture) {
   const idle = await evaluate('window.pi.getStatus()')
   const key = 'session-messages-smoke-fixture'
-  const message = (text) => [{ role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() }]
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  // The message carries a picture, so the editor can be checked for the composer's attachment rules.
+  const message = (text) => [{
+    role: 'user',
+    content: [{ type: 'text', text }, { type: 'image', data: PNG, mimeType: 'image/png' }],
+    timestamp: Date.now()
+  }]
   const shown = (text) => evaluate(`document.body.textContent.includes(${JSON.stringify(text)})`)
 
   // A foreign transcript (another session's key) must be ignored, even across retries.
@@ -35,6 +41,12 @@ module.exports = async function sessionMessagesSmoke(evaluate, until, window, se
     '发送后，这条之后的对话会被丢弃'
   )
   assert.equal(await evaluate('document.querySelector(".user-edit-input").value'), 'OWN_SESSION_SENTINEL')
+  // Attachments behave like the composer's: the message's own picture is there, removable, and a new
+  // one can be attached from the same place.
+  assert.equal(await evaluate('document.querySelectorAll(".user-edit .draft-image").length'), 1, 'its picture is in the editor')
+  assert.equal(await evaluate('!!document.querySelector(".user-edit-attach")'), true, 'and another can be added')
+  await evaluate('document.querySelector(".user-edit .draft-image-remove").click()')
+  await until(() => evaluate('document.querySelectorAll(".user-edit .draft-image").length === 0'), 'the picture can be removed')
   await evaluate(`(() => {
     const area = document.querySelector('.user-edit-input')
     area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
@@ -44,5 +56,5 @@ module.exports = async function sessionMessagesSmoke(evaluate, until, window, se
   setSessionFixture(undefined)
   window.webContents.send('pi:status', idle)
   await until(async () => !(await shown('OWN_SESSION_SENTINEL')))
-  console.log('Session messages passed: foreign transcripts are ignored, the own one arrives, and a user message can be rewritten')
+  console.log('Session messages passed: foreign transcripts are ignored, the own one arrives, and a user message can be rewritten with its attachments')
 }
