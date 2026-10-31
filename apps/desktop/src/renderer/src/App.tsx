@@ -1036,24 +1036,14 @@ export default function App(): React.JSX.Element {
       // while this text tells it that those images form one time-ordered video.
       const promptText = [videoFramePrompt(images), text].filter(Boolean).join('\n\n')
       const steering = behavior === 'steer'
-      // A steer waits at the engine's next boundary, so it is not in the transcript yet: it is shown
-      // as a pending send until the engine's user-message event says it got in. Anything else is in
-      // the transcript by definition, so it gets the optimistic bubble.
-      if (steering) {
-        setPendingSends((prev) => [...prev, { id: localId, key: owner, text, images, promptText }])
-      } else {
-        setItems((prev) => [
-          ...prev,
-          {
-            id: localId,
-            role: 'user',
-            text,
-            images: images.map((image) => ({ data: image.data, mimeType: image.mimeType })),
-            toolCalls: [],
-            pending: true
-          }
-        ])
-      }
+      // Neither kind is in the transcript yet, so neither belongs in it: a bubble that scrolls away
+      // with the conversation reads as already sent. Both wait in the strip above the composer, one
+      // as 「待发送」 (still retractable), the other as 「正在发送」 (the engine took it and is about to
+      // write it). Either way the message leaves the strip when the engine's user-message event lands.
+      setPendingSends((prev) => [
+        ...prev,
+        { id: localId, key: owner, text, images, promptText, mode: steering ? 'steer' : 'direct' }
+      ])
       const result = await window.pi.prompt(
         promptText,
         behavior,
@@ -1064,8 +1054,7 @@ export default function App(): React.JSX.Element {
         })), owner
       ).catch(error => ({ ok: false as const, error: error instanceof Error ? error.message : String(error), queued: false }))
       if (!result.ok) {
-        if (steering) dropPendingSend(localId)
-        else setItems((prev) => prev.filter((item) => item.id !== localId))
+        dropPendingSend(localId)
         if (restoreDraft) setComposers((map) => patchComposer(map, owner, previous => ({
           draft: previous.draft ? `${text}\n${previous.draft}` : text,
           images: [...images, ...previous.images]
@@ -1820,7 +1809,10 @@ export default function App(): React.JSX.Element {
                   key: activeComposerKey,
                   text: target.text,
                   images: target.images,
-                  promptText: [videoFramePrompt(target.images), target.text].filter(Boolean).join('\n\n')
+                  promptText: [videoFramePrompt(target.images), target.text].filter(Boolean).join('\n\n'),
+                  // Still in the queue, so the engine has not taken it: the steer shape is the honest
+                  // one (it can be retracted, and `sendNow` interrupts the run to deliver it).
+                  mode: 'steer'
                 })
               }}
               onNotice={setToast}

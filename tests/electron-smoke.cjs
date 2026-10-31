@@ -9,11 +9,18 @@ app.setAppPath(desktop)
 BrowserWindow.prototype.show = function () {}
 // Session-history fixture only; real preload and image-copy IPC stay untouched.
 let imageCopySessionFixture
+// A prompt fixture, so a step can exercise the sending path without a model behind it.
+let promptFixture
 const originalHandle = ipcMain.handle
 ipcMain.handle = function (channel, listener) {
-  return originalHandle.call(this, channel, channel === 'pi:get-messages'
-    ? (event, ...args) => imageCopySessionFixture ?? listener(event, ...args)
-    : listener)
+  if (channel === 'pi:get-messages') {
+    return originalHandle.call(this, channel, (event, ...args) => imageCopySessionFixture ?? listener(event, ...args))
+  }
+  if (channel === 'pi:prompt') {
+    return originalHandle.call(this, channel, (event, ...args) =>
+      promptFixture ? promptFixture(...args.slice(1)) : listener(event, ...args))
+  }
+  return originalHandle.call(this, channel, listener)
 }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function until(probe, label) {
@@ -133,6 +140,7 @@ app.on('browser-window-created', (_event, window) => {
       await require('./long-message-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./session-isolation-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./queue-smoke.cjs')(evaluate, until, window)
+      await require('./pending-send-smoke.cjs')(evaluate, until, window, fixture => { promptFixture = fixture })
       await require('./session-panel-smoke.cjs')(evaluate, until, window)
       await require('./session-title-smoke.cjs')(evaluate, until)
       await require('./suggestion-smoke.cjs')(evaluate, until, window)

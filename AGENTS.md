@@ -477,3 +477,8 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - **`ready` 不等于 transcript 已就位**：`prophey-engine.start()` 以前先把 `phase` 设成 `ready`，再 `await switchSession()` 读 transcript。700KB 级的会话在解析期间，`pi:get-messages` 看到 ready 就返回 `messages: []`，窗口看到 `sessionKey` 匹配就把空数组当真，画成「开始一段对话」——数据一直在盘上、引擎还在跑任务，界面却说会话是空的，而且之后没有任何东西再触发一次加载。现在 `start()` 载入期间报 `phase: 'starting'`，载完才 `ready`。
 - **“未就绪”和“空”必须区分**：`pi:get-messages` 在 `!running()` 时返回 `pending: true`（`SessionMessages.pending`），不再返回一条假装是真相的空数组。窗口对 `pending` / `switchingEngine` / `phase !== 'ready'` 一律“稍后再问”（150ms × 最多 60 次 ≈ 9s），并且在 `switchingEngine` 为真时不再**丢弃答案而不重试**——切换标志清掉后 status 依赖项没变，effect 不会重跑，那正是会话永久空白的一条路径。
 - **加载中说加载**：新增 `messagesLoading`，`Conversation` 在 `items.length === 0 && loading` 时渲染「正在载入会话…」，不能对正在载入的会话说「开始一段对话」（那句话等于宣布历史没了）。回归 `tests/session-loading-smoke.cjs`：先给 `pending` 空回答，断言不出现「开始一段对话」、出现「正在载入会话…」，等待后仍不冒充空，再给真实消息断言填上。
+
+## 0.6.31 待发送的消息钉在输入框上方
+
+- **没进 transcript 的消息不能长得像已经发了**：直发消息以前被“乐观”插进 `items`（`pending: true` 的气泡），于是它跟着对话滚动、滚出视野，而它其实还没被引擎写进去；也看不出“已准备但未发送”。现在**两类未落地消息都走同一条固定条**（`PendingSends`，`.pending-sends` 绝对定位在 `.chat-area` 内、`.scroll` 之外）：`mode: 'steer'` 的显示「待发送 · 等当前步骤结束」并给 `立即发送`（全应用唯一的硬打断）+ `撤回`（引擎还握着它）；`mode: 'direct'` 的显示「正在发送 · 等引擎写入对话」，因为是引擎已接受、只等落盘，所以既不可撤回也没有 send now。队列里点「立即发送」的那条按 `steer` 形状走（还没被引擎接收）。
+- 落地判定没变：引擎的 user `message_start`/`message_end` 到达时清掉该会话最早的一条 pending，`agent_settled` 兜底清空；真正的消息由 `patchPendingUser` 在没有 pending 气泡时**追加**进 transcript（所以撤掉旧乐观气泡是安全的）。回归 `tests/pending-send-smoke.cjs`：发一条 → 断言固定条在 `.scroll` 之外、文案是「正在发送」、transcript 里没有它、两个按钮都不出现；再派发 user `message_end` → 断言固定条清空且消息进入对话。冒烟骨架为此增加了 `pi:prompt` 的 fixture（第 5 个参数，已有用例忽略）。
