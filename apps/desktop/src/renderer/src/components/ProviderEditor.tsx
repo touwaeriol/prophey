@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ProviderInfo } from '@shared/types'
 import { declaresImageInput } from '@shared/model-input'
+import { needsVersionPath as bareOpenAiUrl, withVersionPath } from '@shared/provider-url'
 import { buildProviderModels, emptyModel, type ModelDraft } from '../lib/provider-models'
 import { CheckIcon, CloseIcon, ExternalIcon, PlusIcon, TrashIcon } from './Icons'
 
@@ -152,19 +153,11 @@ export function ProviderEditor({
 
   /**
    * An OpenAI-compatible adapter appends `/chat/completions` to whatever Base URL it is given, so a
-   * bare host points the request at the gateway's web page (which answers 200 with HTML, and the
-   * failure then looks like "this protocol is not supported").
+   * bare host would point the request at the gateway's web page (200 with HTML, and the failure then
+   * looks like "this protocol is not supported"). Saving fills the version segment in; this flag only
+   * says so before the user commits.
    */
-  const needsVersionPath = (() => {
-    if (!/^openai-/i.test(draft.api.trim())) return false
-    const url = draft.baseUrl.trim()
-    if (!url) return false
-    try {
-      return new URL(url).pathname.replace(/\/+$/, '') === ''
-    } catch {
-      return false
-    }
-  })()
+  const needsVersionPath = bareOpenAiUrl(draft.baseUrl, draft.api)
 
   const applyContent = async (nextContent: string): Promise<void> => {
     setSaving(true)
@@ -356,15 +349,8 @@ export function ProviderEditor({
               />
               {needsVersionPath && (
                 <p className="field-hint warn">
-                  OpenAI 兼容接口会请求 <code>Base URL + /chat/completions</code>；这个地址没有路径段，请求会打到网页上。
-                  <button
-                    className="link-btn"
-                    onClick={() =>
-                      updateDraft({ baseUrl: draft.baseUrl.trim().replace(/\/+$/, '') + '/v1' })
-                    }
-                  >
-                    补成 /v1
-                  </button>
+                  OpenAI 兼容接口会请求 <code>Base URL + /chat/completions</code>：保存时会自动补成{' '}
+                  <code>{withVersionPath(draft.baseUrl)}</code>（带路径的地址不会被动）。
                 </p>
               )}
             </div>

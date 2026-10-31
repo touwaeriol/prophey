@@ -26,6 +26,7 @@ import {
   settingsPath
 } from './profile'
 import { declaresImageInput } from '../shared/model-input'
+import { withVersionPath } from '../shared/provider-url'
 import { guardedStream } from './agent/stream-guard'
 import type { ProviderTestResult } from '../shared/types'
 
@@ -278,9 +279,33 @@ export async function saveModelsJson(content: string): Promise<void> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('models.json 顶层必须是 JSON 对象')
   }
+  normalizeBaseUrls(parsed as Record<string, unknown>)
   await writeJsonAtomic(modelsPath(), parsed)
   resetRuntime()
 }
+
+/**
+ * Accept both `https://host` and `https://host/v1` for OpenAI-compatible endpoints.
+ *
+ * The adapter appends `/chat/completions` to the Base URL it is given, so a bare host asks the
+ * gateway's web page for a completion — the request “works” (200, HTML) and the answer is empty. Most
+ * gateways serve the same API under both spellings, so the missing version segment is filled in at
+ * save time instead of being reported as a broken protocol later. A URL that already carries a path
+ * (`/v1`, `/openai`, …) is left exactly as typed.
+ */
+export function normalizeBaseUrls(file: Record<string, unknown>): void {
+  const providers = providersOf(file)
+  for (const config of Object.values(providers)) {
+    if (!config || typeof config !== 'object') continue
+    const api = typeof config.api === 'string' ? config.api : ''
+    const baseUrl = typeof config.baseUrl === 'string' ? config.baseUrl.trim() : ''
+    if (!baseUrl || !/^openai-(completions|responses)$/i.test(api)) continue
+    config.baseUrl = withVersionPath(baseUrl)
+  }
+}
+
+/** `https://host` → `https://host/v1`; anything with a path is returned unchanged. */
+export { withVersionPath }
 
 /**
  * Providers whose endpoint the window may override.

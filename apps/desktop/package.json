@@ -1,6 +1,6 @@
 {
   "name": "@prophey/desktop",
-  "version": "0.6.22",
+  "version": "0.6.23",
   "private": true,
   "description": "Prophey — a coding agent desktop client",
   "main": "./out/main/index.js",

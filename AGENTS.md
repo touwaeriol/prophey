@@ -38,9 +38,9 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - 同一会话内跨服务商切换是 pi 原生能力：`set_model` 只要求新服务商有凭据，会向会话追加 `model_change` 记录，历史保持不变，下一条 assistant 消息记录新的 `provider/model`。恢复会话时 pi 用会话里最后一个 `model_change` / assistant 消息恢复模型（`sdk.js` 的 `getBranchSelection` + `hasConfiguredAuth`）；凭据缺失才回退默认模型并给出 “Could not restore model …”。切换的代价是 prompt cache 归零、换到窗口更小的模型会触发自动压缩；当前 SDK 会在跨模型请求中过滤其他模型的 thinking/私有签名，并由目标协议适配器处理工具 ID（`pi-ai/dist/api/transform-messages.js`）。
 - **服务商行上的「测试」**（`providers:test` → `providers.testProvider()`）：用同一个 `runtime.streamSimple` 发一条真实请求（`maxTokens: 16`，25s 超时），所以测的是窗口真正走的那条路——鉴权、地址拼接、协议适配器全在里面。结果写在列表行里（`.provider-test`）：通过显示耗时与模型；失败时**必须翻成人话**（`describeFailure()`），而不是把适配器那段 JSON 丢给用户（0.6.18 就是这个毛病）。
 - **自定义 OpenAI 兼容服务商最常见的两个坑**（2026-10 实测）：
-  1. **Base URL 少了 `/v1`**。OpenAI 适配器把 `/chat/completions` 拼在 Base URL 后面，所以 `https://host` 会打到网关的**网页**上——它回 200 + HTML，适配器只报 `Stream ended without finish_reason`，看上去像“不支持这个协议”。`describeFailure()` 先看地址本身（bare host + `api` 以 `openai-` 开头就直接点名），再探 `/models` 看 `content-type` 是不是 HTML；`ProviderEditor` 里同步给 `.field-hint.warn` 和「补成 /v1」一键修复。
+  1. **Base URL 带不带 `/v1` 都行**（用户要求）。OpenAI 适配器把 `/chat/completions` 拼在 Base URL 后面，`https://host` 会打到网关的**网页**（200 + HTML，适配器只报 `Stream ended without finish_reason`，看上去像“不支持这个协议”）。所以 `saveModelsJson()` 在写盘前调 `normalizeBaseUrls()`（`shared/provider-url.ts` 的 `withVersionPath`）：`api` 是 `openai-completions`/`openai-responses` 且地址没有路径段时自动补 `/v1`；**带路径的地址（`/v1`、`/openai`）一律不动**，没被误伤的余地。anthropic 等其他协议不碰（适配器自己加 `/v1/messages`，裸域名本来就是对的）。编辑器保存前会提示“会补成 ×××”；旧文件里已存在的裸域名仍由 `testProvider` 的 `addressProblem()` 点名。
   2. **模型 ID 不是渠道卖的那个**。中转站报 `model_not_found` / `无可用渠道` 时，`probeRemoteModels()` 会拉 `/v1/models`（没 `/v1` 时再试裸域名）把可用 ids 一并回给界面，用户不用猜。
-  3. 回归：`tests/provider-test.test.cjs` 用本地假网关覆盖“HTML 页面”“模型不存在 + 可用列表”与错误映射；smoke 里 `provider-settings-smoke` 校验编辑器的 `/v1` 提醒与一键修复。
+  3. 回归：`tests/provider-test.test.cjs` 用本地假网关覆盖“HTML 页面”“模型不存在 + 可用列表”“错误映射”与**两种地址写法归一化**（含保存落盘）；smoke 里 `provider-settings-smoke` 校验编辑器的提示与最终地址。
 
 ## Theme & sidebar
 

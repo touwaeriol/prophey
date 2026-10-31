@@ -27,6 +27,7 @@ esbuild.buildSync({
     contents: `
       export * as providers from './providers';
       export * as profile from './profile';
+      export * as url from '../shared/provider-url';
     `,
     loader: 'ts',
     resolveDir: path.join(root, 'apps/desktop/src/main')
@@ -45,7 +46,7 @@ esbuild.buildSync({
     ).href
   }
 })
-const { providers, profile } = require(path.join(temp, 'providers.cjs'))
+const { providers, profile, url } = require(path.join(temp, 'providers.cjs'))
 profile.setAgentDir(agentDir)
 
 /** A gateway whose behaviour each test sets: it records what it was asked for. */
@@ -125,8 +126,7 @@ test('a model the channel does not sell names the ids it does sell', async () =>
   assert.deepEqual(result.available, ['deepseek-flash', 'deepseek-v4-1-flash-261017'])
 })
 
-test('a refused key, a 404 and a DNS failure each say what to fix', async () => {
-  assert.match(
+test('a refused key, a 404 and a DNS failure each say what to fix', async () => {  assert.match(
     providers.describeProviderFailure('OpenAI API error (401): {"error":{"message":"Incorrect API key provided"}}'),
     /401\/403/
   )
@@ -135,4 +135,28 @@ test('a refused key, a 404 and a DNS failure each say what to fix', async () => 
   assert.match(providers.describeProviderFailure('<!doctype html><html></html>'), /少了 \/v1/)
   // A message nobody has a canned answer for is passed through, not replaced by "unknown error".
   assert.equal(providers.describeProviderFailure('some brand new failure'), 'some brand new failure')
+})
+
+test('both spellings of an OpenAI Base URL mean the same thing', async () => {
+  const file = {
+    providers: {
+      bare: { api: 'openai-completions', baseUrl: 'https://host.example' },
+      pathed: { api: 'openai-completions', baseUrl: 'https://host.example/openai' },
+      versioned: { api: 'openai-completions', baseUrl: 'https://host.example/v1/' },
+      // The anthropic adapter adds `/v1/messages` itself, so a bare host is correct there.
+      claude: { api: 'anthropic-messages', baseUrl: 'https://host.example' }
+    }
+  }
+  providers.normalizeBaseUrls(file)
+  assert.equal(file.providers.bare.baseUrl, 'https://host.example/v1')
+  assert.equal(file.providers.pathed.baseUrl, 'https://host.example/openai')
+  assert.equal(file.providers.versioned.baseUrl, 'https://host.example/v1/')
+  assert.equal(file.providers.claude.baseUrl, 'https://host.example')
+  assert.equal(url.withVersionPath('not a url'), 'not a url')
+  // Saving is the choke point: the file on disk is what pi reads.
+  await providers.saveModelsJson(
+    JSON.stringify({ providers: { bare: { api: 'openai-responses', baseUrl: 'https://host.example' } } })
+  )
+  const written = JSON.parse(fs.readFileSync(path.join(agentDir, 'models.json'), 'utf8'))
+  assert.equal(written.providers.bare.baseUrl, 'https://host.example/v1')
 })
