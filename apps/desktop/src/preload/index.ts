@@ -103,6 +103,8 @@ const bridge: PiBridge = {
   setProviderBaseUrl: (providerId: string, baseUrl: string | null) =>
     ipcRenderer.invoke('providers:set-base-url', providerId, baseUrl),
   listProviders: () => ipcRenderer.invoke('providers:list'),
+  testProvider: (providerId: string, modelId?: string) =>
+    ipcRenderer.invoke('providers:test', providerId, modelId),
   chatGptUsage: (force?: boolean) =>
     ipcRenderer.invoke('providers:chatgpt-usage', force === true),
   startLogin: (providerId: string, type: ProviderAuthType, loginId: string) =>

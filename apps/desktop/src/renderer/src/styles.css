@@ -2513,6 +2513,30 @@ body.resizing-sidebar * {
   line-height: 1.45;
 }
 
+/* Result of the provider row's 「测试」: one real request, ok or the reason it is not. */
+.provider-test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 10.8px;
+  line-height: 1.45;
+}
+
+.provider-test.ok {
+  color: var(--ok, #4ea36b);
+}
+
+.provider-test.error {
+  color: var(--danger, #e06c5b);
+}
+
+.provider-test-models {
+  color: var(--text-faint);
+  word-break: break-all;
+}
+
 /* ChatGPT plan windows under an OpenAI row: numbers from the Codex login, link to ChatGPT's page. */
 .provider-usage {
   display: flex;
@@ -2871,6 +2895,11 @@ body.resizing-sidebar * {
   font-family: 'Cascadia Code', 'Consolas', monospace;
   font-size: 10.5px;
   word-break: break-all;
+}
+
+/* A field that will save fine but cannot work (a Base URL handed to an OpenAI adapter without /v1). */
+.field-hint.warn {
+  color: var(--warn, #d9a13b);
 }
 
 /* ---------------- software update ---------------- */

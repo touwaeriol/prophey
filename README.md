@@ -13,6 +13,7 @@ adapters; the desktop owns projects, session navigation and UI.
 - Edit an earlier message and resend from there: everything after it is dropped (Prophey rewrites the session file, pi forks its session tree; Claude Code and Codex report that they cannot)
 - Paste or drop images into the composer; images are sent to the model and stay viewable in the transcript
 - Model picker and model allow-list per provider
+- Per-provider connectivity test: one real request, with the failure translated into what to fix (a Base URL missing `/v1`, a model the channel does not sell — it lists the ids it does)
 - Provider login (OAuth / API key), custom providers via `models.json`
 - Light and dark themes
 - Conversation outline and user-message timeline

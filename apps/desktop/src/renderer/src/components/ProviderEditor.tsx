@@ -150,6 +150,22 @@ export function ProviderEditor({
   })
   const savedProvider = parsed.list.find((item) => item.id === provider?.id)
 
+  /**
+   * An OpenAI-compatible adapter appends `/chat/completions` to whatever Base URL it is given, so a
+   * bare host points the request at the gateway's web page (which answers 200 with HTML, and the
+   * failure then looks like "this protocol is not supported").
+   */
+  const needsVersionPath = (() => {
+    if (!/^openai-/i.test(draft.api.trim())) return false
+    const url = draft.baseUrl.trim()
+    if (!url) return false
+    try {
+      return new URL(url).pathname.replace(/\/+$/, '') === ''
+    } catch {
+      return false
+    }
+  })()
+
   const applyContent = async (nextContent: string): Promise<void> => {
     setSaving(true)
     setEditorError(undefined)
@@ -338,6 +354,19 @@ export function ProviderEditor({
                 spellCheck={false}
                 onChange={(event) => updateDraft({ baseUrl: event.target.value })}
               />
+              {needsVersionPath && (
+                <p className="field-hint warn">
+                  OpenAI 兼容接口会请求 <code>Base URL + /chat/completions</code>；这个地址没有路径段，请求会打到网页上。
+                  <button
+                    className="link-btn"
+                    onClick={() =>
+                      updateDraft({ baseUrl: draft.baseUrl.trim().replace(/\/+$/, '') + '/v1' })
+                    }
+                  >
+                    补成 /v1
+                  </button>
+                </p>
+              )}
             </div>
 
             <div className="field-grid two">

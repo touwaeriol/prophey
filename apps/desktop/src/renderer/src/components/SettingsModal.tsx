@@ -16,6 +16,7 @@ import type {
   ProviderAuthType,
   ProviderInfo,
   ProviderModelOption,
+  ProviderTestResult,
   ProxyInfo
 } from '@shared/types'
 import {
@@ -216,6 +217,10 @@ export function SettingsModal({
     }
   }, [open])
   const [providers, setProviders] = useState<ProviderInfo[]>([])
+  /** Per-provider connectivity test: busy flag plus the last answer. */
+  const [providerTests, setProviderTests] = useState<
+    Record<string, { busy?: boolean; result?: ProviderTestResult }>
+  >({})
   const [providersLoading, setProvidersLoading] = useState(false)
   /** ChatGPT plan windows behind the OpenAI rows; `undefined` until the first answer arrives. */
   const [usage, setUsage] = useState<ChatGptUsageResult>()
@@ -596,8 +601,22 @@ export function SettingsModal({
     setLogin(undefined)
   }, [])
 
-  const logout = useCallback(
-    async (provider: ProviderInfo) => {
+  /**
+   * One real request through this provider, so a wrong Base URL or model id is caught here instead
+   * of in the middle of a conversation.
+   */
+  const runProviderTest = useCallback(async (provider: ProviderInfo): Promise<void> => {
+    setProviderTests((prev) => ({ ...prev, [provider.id]: { busy: true } }))
+    const result = await window.pi
+      .testProvider(provider.id)
+      .catch((error): ProviderTestResult => ({
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error)
+      }))
+    setProviderTests((prev) => ({ ...prev, [provider.id]: { busy: false, result } }))
+  }, [])
+
+  const logout = useCallback(async (provider: ProviderInfo) => {
       if (confirmLogout !== provider.id) {
         setConfirmLogout(provider.id)
         setTimeout(
@@ -887,6 +906,25 @@ export function SettingsModal({
                           onManage={() => void window.pi.openExternal(CHATGPT_USAGE_URL)}
                         />
                       )}
+                      {providerTests[provider.id]?.result && (
+                        <div
+                          className={`provider-test ${
+                            providerTests[provider.id].result?.ok ? 'ok' : 'error'
+                          }`}
+                        >
+                          {providerTests[provider.id].result?.ok
+                            ? `测试通过 · ${providerTests[provider.id].result?.ms ?? 0}ms · ${
+                                providerTests[provider.id].result?.model ?? ''
+                              }`
+                            : `测试失败：${providerTests[provider.id].result?.detail ?? ''}`}
+                          {!providerTests[provider.id].result?.ok &&
+                            (providerTests[provider.id].result?.available?.length ?? 0) > 0 && (
+                              <span className="provider-test-models">
+                                该渠道可用：{providerTests[provider.id].result?.available?.join(' · ')}
+                              </span>
+                            )}
+                        </div>
+                      )}
                     </div>
                     <div className="provider-actions">
                       {webSearch !== undefined &&
@@ -933,6 +971,17 @@ export function SettingsModal({
                         >
                           <ListIcon size={12} /> 模型
                         </button>
+                        {provider.configured && (
+                          <button
+                            className="prov-btn ghost"
+                            disabled={providerTests[provider.id]?.busy === true}
+                            title="用这个服务商发一条真实请求，验证地址、Key 和模型 ID"
+                            onClick={() => void runProviderTest(provider)}
+                          >
+                            <PlugIcon size={12} />
+                            {providerTests[provider.id]?.busy ? '测试中…' : '测试'}
+                          </button>
+                        )}
                         <button className="prov-btn ghost" onClick={() => void openProviderEditor('form', provider)}
                           title="编辑接口地址、凭据与模型定义">
                           <PencilIcon size={12} /> 编辑

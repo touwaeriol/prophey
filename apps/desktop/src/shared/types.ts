@@ -240,6 +240,18 @@ export interface ProviderInfo {
   baseUrlEditable?: boolean;
 }
 
+export interface ProviderTestResult {
+  ok: boolean;
+  /** The model the request used. */
+  model?: string;
+  /** Round trip in milliseconds. */
+  ms?: number;
+  /** What happened, already in the user's terms. */
+  detail?: string;
+  /** Model ids the endpoint actually offers, when the failure was a wrong model. */
+  available?: string[];
+}
+
 export interface LoginPromptOption {
   id: string;
   label: string;
@@ -751,6 +763,8 @@ export interface PiBridge {
     baseUrl: string | null,
   ): Promise<{ ok: boolean; error?: string }>;
   listProviders(): Promise<ProviderInfo[]>;
+  /** Send one real request through this provider and report what came back. */
+  testProvider(providerId: string, modelId?: string): Promise<ProviderTestResult>;
   /** ChatGPT plan windows (5 h / weekly) for the OpenAI cards; `force` skips the short cache. */
   chatGptUsage(force?: boolean): Promise<ChatGptUsageResult>;
   startLogin(

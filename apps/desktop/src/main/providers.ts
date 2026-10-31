@@ -26,6 +26,8 @@ import {
   settingsPath
 } from './profile'
 import { declaresImageInput } from '../shared/model-input'
+import { guardedStream } from './agent/stream-guard'
+import type { ProviderTestResult } from '../shared/types'
 
 const DEFAULT_MODELS_JSON = JSON.stringify(
   {
@@ -703,4 +705,156 @@ export async function resolveModelChoice(
       message: `找不到模型 ${id}${near.length > 0 ? `。相近：${near.join(', ')}` : ''}。用 list_models 查看可用模型`
     }
   }
+}
+
+/**
+ * One real request through the same runtime a chat turn uses, so the answer is about the path the
+ * app actually takes — headers, auth, URL joining and all — and not a second implementation of it.
+ *
+ * Failures are translated into what the user can act on: a gateway that answers with an HTML page
+ * (almost always a Base URL without `/v1`), a model id the channel does not sell, or a key that is
+ * refused. When the model is the problem we also ask the endpoint which ids it does offer.
+ */
+export async function testProvider(providerId: string, modelId?: string): Promise<ProviderTestResult> {
+  const runtime = await getRuntime()
+  const provider = runtime.getProvider(providerId)
+  if (!provider) return { ok: false, detail: '未知服务商' }
+  const models = provider.getModels() as Model<string>[]
+  const model = modelId ? models.find((entry) => entry.id === modelId) : models[0]
+  if (!model) {
+    return {
+      ok: false,
+      detail: modelId ? `该服务商里没有模型 ${modelId}` : '这个服务商没有可测试的模型'
+    }
+  }
+  const started = Date.now()
+  try {
+    const stream = guardedStream<Record<string, unknown>>(
+      (signal) =>
+        runtime.streamSimple(
+          model,
+          {
+            systemPrompt: '这是连通性测试，只回复 OK。',
+            messages: [{ role: 'user', content: 'ping', timestamp: Date.now() }],
+            tools: []
+          },
+          { signal, maxTokens: 16, reasoning: undefined }
+        ) as AsyncIterable<Record<string, unknown>>,
+      AbortSignal.timeout(PROVIDER_TEST_TIMEOUT_MS),
+      PROVIDER_TEST_TIMEOUT_MS
+    )
+    for await (const event of stream) {
+      if (event.type === 'error') {
+        const raw = (event as { error?: unknown }).error
+        throw new Error(typeof raw === 'string' ? raw : JSON.stringify(raw))
+      }
+      if (event.type === 'done') return { ok: true, model: model.id, ms: Date.now() - started }
+    }
+    return { ok: true, model: model.id, ms: Date.now() - started }
+  } catch (error) {
+    const raw = error instanceof Error ? error.message : String(error)
+    const detail = await describeFailure(providerId, raw)
+    const available = /model|模型|渠道/i.test(raw) ? await probeRemoteModels(providerId) : undefined
+    return { ok: false, model: model.id, ms: Date.now() - started, detail, available }
+  }
+}
+
+const PROVIDER_TEST_TIMEOUT_MS = 25_000
+
+/** Turn an adapter error into something a user can act on instead of a JSON blob. */
+export function describeProviderFailure(raw: string): string {
+  const text = raw.trim()
+  if (/<html|<!doctype html/i.test(text)) {
+    return '接口返回的是网页而不是 JSON：Base URL 很可能少了 /v1（OpenAI 兼容地址一般以 /v1 结尾）'
+  }
+  if (/model_not_found|无可用渠道|model not found|does not exist|invalid model/i.test(text)) {
+    return '该渠道没有这个模型：换一个模型 ID，或到服务商控制台开通这个模型'
+  }
+  if (/(401|403)|invalid api key|unauthorized|incorrect api key/i.test(text)) {
+    return '凭据被拒绝（401/403）：检查 API Key 是否填对、是否已过期'
+  }
+  if (/404/.test(text)) {
+    return '接口地址 404：检查 Base URL（OpenAI 兼容地址一般以 /v1 结尾）'
+  }
+  if (/429/.test(text)) return '请求太频繁（429）：稍后再试'
+  if (/ETIMEDOUT|timeout|timed out/i.test(text)) return '请求超时：检查网络或代理'
+  if (/stream ended without finish_reason/i.test(text)) {
+    return '接口没有返回可用的流式响应：Base URL 很可能少了 /v1，或这个地址不是 OpenAI 兼容接口'
+  }
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(text)) return '域名解析失败：检查 Base URL 是否写对'
+  if (/ECONNREFUSED|ECONNRESET|socket hang up/i.test(text)) return '连接被拒绝或中断：检查地址与代理设置'
+  return text.length > 400 ? text.slice(0, 400) + '…' : text
+}
+
+/**
+ * The address itself is the usual culprit, and the adapter's own error does not say so: an
+ * OpenAI-compatible client that is handed a bare host asks the gateway's web page for a completion
+ * and reports “stream ended without finish_reason”. So look at the configured address first.
+ */
+async function describeFailure(providerId: string, raw: string): Promise<string> {
+  const address = await addressProblem(providerId)
+  return address ?? describeProviderFailure(raw)
+}
+
+async function addressProblem(providerId: string): Promise<string | undefined> {
+  try {
+    const config = providersOf(await readModelsJsonObject())[providerId] as
+      | { api?: string; baseUrl?: string; apiKey?: string }
+      | undefined
+    const baseUrl = String(config?.baseUrl ?? '').trim().replace(/\/+$/, '')
+    if (!baseUrl) return undefined
+    let bare = false
+    try {
+      bare = new URL(baseUrl).pathname.replace(/\/+$/, '') === ''
+    } catch {
+      return `Base URL 不是合法地址：${baseUrl}`
+    }
+    // Deterministic: no request needed to know where `/chat/completions` will land.
+    if (bare && /^openai-/i.test(String(config?.api ?? ''))) {
+      return `Base URL 少了 /v1：适配器会请求 ${baseUrl}/chat/completions，打到的是网页而不是接口（一般应写成 ${baseUrl}/v1）`
+    }
+    const key = String(config?.apiKey ?? '').trim() || (await providerApiKey(providerId))
+    if (!key) return undefined
+    // Ask the address what it serves too: a gateway page answers 200 with HTML.
+    const response = await fetch(`${baseUrl}/models`, {
+      headers: { authorization: `Bearer ${key}`, 'x-api-key': key },
+      signal: AbortSignal.timeout(8_000)
+    }).catch(() => undefined)
+    if ((response?.headers.get('content-type') ?? '').includes('text/html')) {
+      return '接口返回的是网页而不是 JSON：Base URL 很可能少了 /v1（OpenAI 兼容地址一般以 /v1 结尾）'
+    }
+  } catch {
+    // Whatever went wrong here is not the answer; the request's own error still is.
+  }
+  return undefined
+}
+
+/** Ask the endpoint which model ids it sells; a wrong id is otherwise a guessing game. */
+async function probeRemoteModels(providerId: string): Promise<string[] | undefined> {
+  try {
+    const config = providersOf(await readModelsJsonObject())[providerId] as
+      | { baseUrl?: string; apiKey?: string }
+      | undefined
+    const baseUrl = config?.baseUrl?.trim().replace(/\/+$/, '')
+    const key = config?.apiKey?.trim() || (await providerApiKey(providerId))
+    if (!baseUrl || !key) return undefined
+    const roots = /\/v\d+$/.test(baseUrl) ? [baseUrl] : [baseUrl + '/v1', baseUrl]
+    for (const root of roots) {
+      const response = await fetch(`${root}/models`, {
+        headers: { authorization: `Bearer ${key}`, 'x-api-key': key },
+        signal: AbortSignal.timeout(10_000)
+      }).catch(() => undefined)
+      if (!response?.ok) continue
+      const body = (await response.json().catch(() => undefined)) as
+        | { data?: Array<{ id?: unknown }> }
+        | undefined
+      const ids = (body?.data ?? [])
+        .map((entry) => (typeof entry.id === 'string' ? entry.id : ''))
+        .filter(Boolean)
+      if (ids.length > 0) return ids.slice(0, 12)
+    }
+  } catch {
+    // A probe that fails is not the answer; the original error still is.
+  }
+  return undefined
 }

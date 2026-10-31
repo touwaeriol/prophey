@@ -79,6 +79,19 @@ module.exports = async function checkProviderSettings(evaluate, until) {
   await save()
   await openRow('smoke-provider')
   assert.equal(await evaluate('document.querySelector(".provider-editor input[type=password]").type'), 'password')
+  // An OpenAI adapter appends /chat/completions, so a bare host is pointed at a web page: say so, and
+  // offer the one-click fix instead of letting the first conversation fail.
+  await input('input[placeholder="https://api.example.com/v1"]', 'https://example.invalid')
+  await until(() => evaluate('!!document.querySelector(".field-hint.warn")'), 'bare host warning')
+  assert.match(
+    await evaluate('document.querySelector(".field-hint.warn").textContent'),
+    /chat\/completions/
+  )
+  await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.field-hint.warn button')].find((node) => node.textContent.includes('/v1'))
+    button?.click()
+  })()`)
+  assert.equal(await evaluate('document.querySelector(\'input[placeholder="https://api.example.com/v1"]\').value'), 'https://example.invalid/v1')
   await input('input[placeholder="https://api.example.com/v1"]', 'https://example.invalid/edited')
   await save()
   const edited = (await saved()).providers['smoke-provider']

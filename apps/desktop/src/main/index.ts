@@ -2557,6 +2557,11 @@ function registerIpc(): void {
 
   handle('providers:list', () => providers.listProviders())
 
+  /** The provider row's 「测试」: one real request, so a wrong URL or model id is caught here. */
+  handle('providers:test', (_event, providerId: string, modelId?: string) =>
+    providers.testProvider(providerId, modelId)
+  )
+
   // OpenAI does not expose plan usage to "Sign in with ChatGPT" credentials; see chatgpt-usage.ts.
   handle('providers:chatgpt-usage', (_event, force?: boolean) => chatGptUsage({ force: force === true }))
 
