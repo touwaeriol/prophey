@@ -8,6 +8,7 @@ import { SUBAGENT_STATUS_LABELS, isSubagentRunning } from '../lib/subagents'
 import { usageMeter } from '../lib/context-usage'
 import { imageSrc, type DraftImage } from '../lib/images'
 import { useDraftImages } from '../hooks/useDraftImages'
+import { PendingSends, type PendingSend } from './PendingSends'
 
 /**
  * How much of a transcript is mounted on opening, and how much more each scroll to the top adds.
@@ -469,7 +470,10 @@ export function Conversation({
   sessionKey,
   anchorId,
   scrollRef,
-  loading
+  loading,
+  pending = [],
+  onSendNow,
+  onCancel
 }: {
   items: ChatItem[]
   workspace: string
@@ -488,6 +492,16 @@ export function Conversation({
   scrollRef?: React.RefObject<HTMLDivElement | null>
   /** History is on its way: say so instead of claiming the conversation is empty. */
   loading?: boolean
+  /**
+   * Messages the engine is still holding for this session.
+   *
+   * Rendered at the user's place at the end of the transcript, not in a floating panel: they are
+   * messages the user wrote, they just have not been delivered yet. The pane deliberately does not
+   * scroll to them — the reader stays where they were while the run in flight finishes.
+   */
+  pending?: PendingSend[]
+  onSendNow?: (item: PendingSend) => void
+  onCancel?: (item: PendingSend) => void
 }) {
   const windowRef = useRef<{ key?: string; start: number }>({ start: 0 })
   const heightRef = useRef(0)
@@ -541,7 +555,9 @@ export function Conversation({
     if (container) heightRef.current = container.scrollHeight
   })
 
-  if (items.length === 0) {
+  // A message on its way in already makes this a conversation, even before the engine echoes it
+  // back: the first turn of a session is exactly when the bubble has to be visible somewhere.
+  if (items.length === 0 && pending.length === 0) {
     // A conversation being loaded is not an empty one. Without this the window offered 「开始一段
     // 对话」 over a session whose engine was still starting, which reads as "my history is gone".
     if (loading) {
@@ -597,6 +613,9 @@ export function Conversation({
           />
         )
       })}
+      {onSendNow && onCancel && (
+        <PendingSends items={pending} onSendNow={onSendNow} onCancel={onCancel} inline />
+      )}
     </div>
   )
 }

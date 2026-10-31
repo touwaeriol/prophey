@@ -31,15 +31,23 @@ export interface PendingSend {
 export function PendingSends({
   items,
   onSendNow,
-  onCancel
+  onCancel,
+  inline = false
 }: {
   items: PendingSend[]
   onSendNow: (item: PendingSend) => void
   onCancel: (item: PendingSend) => void
+  /**
+   * Sit in the transcript at the user's place instead of floating over it.
+   *
+   * A waiting message is a message the user wrote: it belongs where it will land, right after the
+   * last turn, so it can be read in context. It still says it has not been delivered.
+   */
+  inline?: boolean
 }) {
   if (items.length === 0) return null
   return (
-    <div className="pending-sends" aria-live="polite">
+    <div className={`pending-sends ${inline ? 'inline' : ''}`} aria-live="polite">
       {items.map((item) => (
         <div className="pending-send" key={item.id}>
           <div className="pending-send-state">

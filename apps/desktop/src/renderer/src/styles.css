@@ -5257,6 +5257,28 @@ body.resizing-sidebar * {
   pointer-events: none;
 }
 
+/*
+ * Inline: the same pending bubble, but sitting at the user's place in the transcript.
+ *
+ * It used to float over the chat area, which read as a toast rather than as a message that is on its
+ * way in — and it hid the run it was waiting for. In the transcript it reads in order; the transcript
+ * simply does not scroll to it.
+ */
+.pending-sends.inline {
+  position: static;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  width: 100%;
+  max-width: 100%;
+  pointer-events: auto;
+}
+
+.pending-sends.inline .pending-send {
+  max-width: min(560px, 86%);
+  box-shadow: none;
+}
+
 .pending-send {
   pointer-events: auto;
   display: flex;

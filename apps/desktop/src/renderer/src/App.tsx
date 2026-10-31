@@ -27,7 +27,7 @@ import { ConfirmDialog, type ConfirmRequest } from './components/ConfirmDialog'
 import { SubagentsDrawer } from './components/SubagentsDrawer'
 import { TaskDrawer, type TaskTarget } from './components/TaskDrawer'
 import { RunStatusBar } from './components/RunStatusBar'
-import { PendingSends, type PendingSend } from './components/PendingSends'
+import type { PendingSend } from './components/PendingSends'
 import { SessionPanel } from './components/SessionPanel'
 import { Markdown } from './components/Markdown'
 import type { DraftImage } from './lib/images'
@@ -1743,6 +1743,9 @@ export default function App(): React.JSX.Element {
                   subagents={subagents}
                   onOpenSubagent={openSubagents}
                   onEditTurn={onEditTurn}
+                  pending={pendingSends.filter((entry) => entry.key === activeComposerKey)}
+                  onSendNow={(item) => void sendNow(item)}
+                  onCancel={(item) => void cancelPendingSend(item)}
                   onSuggestion={(text) => {
                     setDraft(text)
                     requestAnimationFrame(() => {
@@ -1762,11 +1765,6 @@ export default function App(): React.JSX.Element {
                   onJump={jumpToMessage}
                 />
               )}
-              <PendingSends
-                items={pendingSends.filter((entry) => entry.key === activeComposerKey)}
-                onSendNow={(item) => void sendNow(item)}
-                onCancel={(item) => void cancelPendingSend(item)}
-              />
             </div>
 
             {ask && (

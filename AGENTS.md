@@ -460,7 +460,7 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - Prophey/pi 模型选择器与 `/model` 只允许已配置且 enabledModels 启用的服务商模型。CC/Codex 只接受原生目录返回的模型，不接受任意字符串。
 - Prophey 思考等级复用 pi-ai 的 getSupportedThinkingLevels，尊重 reasoning/thinkingLevelMap，发送到 streamSimple 的 reasoning；off 不发送 reasoning。会话头保存模型/思考等级并在恢复后校验。
 - Prophey 不再在 16 轮工具后静默结束。每轮检查自动压缩；流提前关闭、空回复和 180 秒无新数据均明确报错/重试，可随时中止。
-- **Prophey 支持运行中引导（steer）**：`prompt(message, { behavior: 'steer' })` 在 `busy()` 时不再报「上一轮还没结束」，而是 `steer()`：把这条 user 消息排队（工具批次开着时先挂在 `queuedSteers`，否则立刻 `deliverSteer()` 推进 transcript 并发 `message_start`/`message_end`），返回 `steerId`，并置 `steerPending`。**窗口在它真进 transcript 之前看不到消息内容**，只看到渲染层自己的「待发送」浮层（见「消息队列」一节）。`cancelSteer(steerId)` 只能在还挂着的时候撤回（批次一 flush 就返回 `{ok:false}`，此时界面给的是「立即发送」而不是撤回）。主循环每轮开头清 `steerPending`，这一轮跑完若发现它又被置上，就 `continue` 再跑一轮（模型因此看得到这条插话）；万一它在循环退出后才到，`finally` 里用 `scheduleNoticeTurn()` 补一轮。`streamRound` 每轮都 `structuredClone(transcript)`，所以流式中途 append 不会弄脏在飞的请求。非 `steer` 的 `prompt` 在忙时仍然拒绝（不静默丢）。
+- **Prophey 支持运行中引导（steer）**：`prompt(message, { behavior: 'steer' })` 在 `busy()` 时不再报「上一轮还没结束」，而是 `steer()`：把这条 user 消息排队（工具批次开着时先挂在 `queuedSteers`，否则立刻 `deliverSteer()` 推进 transcript 并发 `message_start`/`message_end`），返回 `steerId`，并置 `steerPending`。**窗口在它真进 transcript 之前看不到消息内容**，只看到渲染层自己那条「待发送」气泡（在对话末尾、用户自己的位置，见「消息队列」一节）。`cancelSteer(steerId)` 只能在还挂着的时候撤回（批次一 flush 就返回 `{ok:false}`，此时界面给的是「立即发送」而不是撤回）。主循环每轮开头清 `steerPending`，这一轮跑完若发现它又被置上，就 `continue` 再跑一轮（模型因此看得到这条插话）；万一它在循环退出后才到，`finally` 里用 `scheduleNoticeTurn()` 补一轮。`streamRound` 每轮都 `structuredClone(transcript)`，所以流式中途 append 不会弄脏在飞的请求。非 `steer` 的 `prompt` 在忙时仍然拒绝（不静默丢）。
 - 状态栏依据 status.isStreaming/compacting 而非仅依赖事件计数；activity 给出准备/等待模型/执行工具/重试状态，backgroundTasks 单独报告仍在运行的 Bash，前台结束时不得隐藏后台任务。
 - 输入框只保留简短占位提示，底部不再显示重复的快捷键说明栏；Enter 引导 / Ctrl+Enter 排队行为不变。`tests/queue-smoke.cjs` 验证无重复栏并测量节省空间。
 - **OpenAI 长窗口元数据修正**：`resources/extension/model-context.ts` 是主进程 SDK 与桌面 pi（含子代理）共用的修正入口，独立于 MCP 开关。仅把 `openai` 下 GPT-6 Astra/Luna/Sol、GPT-6.1 Sol 的旧 `272000` 内置窗口修正为官方 API 的 `1050000`；272K 计费分界和 128K 输出上限不变。修正在用户配置下层，显式 `models` / `modelOverrides` 仍优先；pi 在 `session_start` 确认没有用户扩展接管 OpenAI 后才注册，避免覆盖用户扩展的代理地址、认证或模型。不写用户配置、不修改 node_modules、不覆盖未来 SDK 的不同窗口值。不要据此推断 `openai-codex` 或原生 Codex 的账号窗口权限。`tests/model-context.test.cjs` 覆盖真实 SDK、Prophey 压缩与 pi RPC 的一致性（不发付费模型请求）。
@@ -487,3 +487,10 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 
 - **一轮里连着的工具卡片合成一个块**（用户要求）：以前 `.tool-list` 是 `gap: 2px`，相邻两张卡各有一条 1px 边框对着，所以十次调用看着像十个互不相干的对象，还白吃一段纵向空间。现在 `gap: 0`、`.tool-card + .tool-card { margin-top: -1px }` 让两张卡共用一条边线，圆角只留整块的首尾（`:not(:first-child)` / `:not(:last-child)`）。回归 `tests/tool-spacing-smoke.cjs`：先发 assistant `message_start`（工具事件本身不会创建 assistant 条目，`patchLastAssistant` 找不到就直接返回），再发三条 `tool_execution_start`，断言相邻卡片 `top - prev.bottom === -1`、list `row-gap: 0px`、首尾仍有圆角。
 - 注意：`.tool-card` / `.tool-list` 只被 `Conversation.tsx` 的 `ToolList`/`ToolCard` 使用，改样式不会波及子代理卡片等其他组件。
+
+## 0.6.33 待发送的消息回到它自己的位置
+
+- **不再悬浮**：`PendingSends` 以前是绝对定位在 `.chat-area` 里、`.scroll` 之外的一条（见 0.6.31），读起来像 toast，而且正好盖住它等待的那一轮输出。现在它作为对话的最后一个块渲染在 `.conversation` 内（`Conversation` 接收 `pending` / `onSendNow` / `onCancel`，在 `items.slice(start)` 之后调用 `PendingSends ... inline`），右对齐、虚线边框、保留状态行（`待发送 · 等当前步骤结束` / `正在发送 · 等引擎写入对话`），steer 形态仍有 `立即发送` + `撤回`，direct 形态两个按钮都不给。
+- **只是不滚动**：它不参与 `items`，所以那条「stick 就滚到底」的 effect 不会因为它的出现触发；用户停在哪就还在哪。等引擎真的把它写进 transcript（user `message_start`/`message_end`），这条消失、由 `patchPendingUser` 追加成正式气泡——落地判定没变。
+- **空会话也显示**：会话还没有任何消息时（首条消息刚发出、引擎还没回写），`items.length === 0` 不再直接给「开始一段对话」，而是照常渲染对话容器 + 这条待发送气泡；否则第一次发送的那一下什么都看不到。
+- 回归：`tests/pending-sends.test.cjs`（react-dom/server 直接渲染断言内联形态、空会话、位置在最后一条之后、direct 无按钮）+ 重写的 `tests/pending-send-smoke.cjs`（真机：待发送在 `.scroll` 内、是对话最后一个块、`scrollTop` 不变、steer 有 `立即发送`/`撤回` 且撤回后消失）。原先那条「固定条必须在 `.scroll` 之外」的断言是 0.6.31 的策略，已随这次需求反转。
