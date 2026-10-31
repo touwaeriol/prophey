@@ -141,6 +141,7 @@ app.on('browser-window-created', (_event, window) => {
       await require('./session-isolation-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./queue-smoke.cjs')(evaluate, until, window)
       await require('./pending-send-smoke.cjs')(evaluate, until, window, fixture => { promptFixture = fixture })
+      await require('./tool-spacing-smoke.cjs')(evaluate, until, window)
       await require('./session-panel-smoke.cjs')(evaluate, until, window)
       await require('./session-title-smoke.cjs')(evaluate, until)
       await require('./suggestion-smoke.cjs')(evaluate, until, window)

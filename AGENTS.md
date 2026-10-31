@@ -482,3 +482,8 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 
 - **没进 transcript 的消息不能长得像已经发了**：直发消息以前被“乐观”插进 `items`（`pending: true` 的气泡），于是它跟着对话滚动、滚出视野，而它其实还没被引擎写进去；也看不出“已准备但未发送”。现在**两类未落地消息都走同一条固定条**（`PendingSends`，`.pending-sends` 绝对定位在 `.chat-area` 内、`.scroll` 之外）：`mode: 'steer'` 的显示「待发送 · 等当前步骤结束」并给 `立即发送`（全应用唯一的硬打断）+ `撤回`（引擎还握着它）；`mode: 'direct'` 的显示「正在发送 · 等引擎写入对话」，因为是引擎已接受、只等落盘，所以既不可撤回也没有 send now。队列里点「立即发送」的那条按 `steer` 形状走（还没被引擎接收）。
 - 落地判定没变：引擎的 user `message_start`/`message_end` 到达时清掉该会话最早的一条 pending，`agent_settled` 兜底清空；真正的消息由 `patchPendingUser` 在没有 pending 气泡时**追加**进 transcript（所以撤掉旧乐观气泡是安全的）。回归 `tests/pending-send-smoke.cjs`：发一条 → 断言固定条在 `.scroll` 之外、文案是「正在发送」、transcript 里没有它、两个按钮都不出现；再派发 user `message_end` → 断言固定条清空且消息进入对话。冒烟骨架为此增加了 `pi:prompt` 的 fixture（第 5 个参数，已有用例忽略）。
+
+## 0.6.32 连续工具调用并成一块
+
+- **一轮里连着的工具卡片合成一个块**（用户要求）：以前 `.tool-list` 是 `gap: 2px`，相邻两张卡各有一条 1px 边框对着，所以十次调用看着像十个互不相干的对象，还白吃一段纵向空间。现在 `gap: 0`、`.tool-card + .tool-card { margin-top: -1px }` 让两张卡共用一条边线，圆角只留整块的首尾（`:not(:first-child)` / `:not(:last-child)`）。回归 `tests/tool-spacing-smoke.cjs`：先发 assistant `message_start`（工具事件本身不会创建 assistant 条目，`patchLastAssistant` 找不到就直接返回），再发三条 `tool_execution_start`，断言相邻卡片 `top - prev.bottom === -1`、list `row-gap: 0px`、首尾仍有圆角。
+- 注意：`.tool-card` / `.tool-list` 只被 `Conversation.tsx` 的 `ToolList`/`ToolCard` 使用，改样式不会波及子代理卡片等其他组件。

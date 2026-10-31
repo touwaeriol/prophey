@@ -6030,7 +6030,23 @@ body.resizing-sidebar * {
 .tool-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  /* Consecutive calls are one block of work, not a stack of separate answers: no gap, and the line
+     between two cards is drawn once (`margin-top: -1px`) with the outer corners rounded only. */
+  gap: 0;
+}
+
+.tool-list .tool-card + .tool-card {
+  margin-top: -1px;
+}
+
+.tool-list .tool-card:not(:first-child) {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.tool-list .tool-card:not(:last-child) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .card-chevron {
