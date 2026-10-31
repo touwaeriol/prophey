@@ -300,7 +300,7 @@ export async function buildEngineTargets(options: {
   const ordered = [primary, ...roots.filter((root) => root !== primary)].slice(0, ENGINE_ROOT_LIMIT)
   for (const id of ['codegraph', 'warpgrep', 'web'] as McpEngineId[]) {
     const engine = options.config[id]
-    if (!engine?.enabled) continue
+    if (engine?.enabled === false) continue
     if (id === 'web') {
       // The gateway resolves Brave / provider native per call, so nothing else is needed here.
       if (options.webAvailable === false) continue
@@ -333,7 +333,7 @@ export async function buildEngineTargets(options: {
       }
       continue
     }
-    const detection = await detect(id, engine.entry?.trim() || undefined)
+    const detection = await detect(id, engine?.entry?.trim() || undefined)
     if (!detection.entry) continue
     for (const root of ordered) {
       targets.push({
@@ -430,7 +430,7 @@ export async function engineStates(options: {
       id,
       name:
         id === 'codegraph' ? 'CodeGraph' : id === 'warpgrep' ? 'WarpGrep' : '网络搜索',
-      enabled: Boolean(engine.enabled),
+      enabled: engine.enabled !== false,
       available,
       entry:
         id === 'warpgrep'

@@ -86,6 +86,8 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - **产出**来自 transcript 的写文件工具调用（`lib/session-outputs.ts`，纯函数、有单测）：`write_file`/`write`/`Write`/`edit_file`/`Edit`/`multiedit` 等取 `path`/`file_path` 参数，Codex 的 `apply_patch` 解析 `*** Update|Add|Delete File:` 行；相对路径按 `status.cwd` 解析，失败的调用丢弃，同一文件只留一条（最新在前，保留首次的写/改类型）。点条目走 `workspace:reveal`，主进程只允许会话工作区（含 additional）内的路径，越界或文件不存在返回错误，不在渲染层拼路径直接开。
 - **后台任务**读 `status.backgroundTasks`（运行中）和 `status.backgroundFinished`（本会话已结束数量，`BashTasks.finishedCount()`，受 128 条保留上限约束，是「最近」不是生命周期总数）。停止按钮走 `engine:stop-background-task` → `AgentEngine.stopBackgroundTask?`；只有 Prophey 引擎实现，其他引擎回错误并提示用 `stop_bash_task`，**不要给所有引擎假装支持**。
 - **连接器**读 `get_mcp_state`（App 已订阅 `mcp:state`，面板和设置页共享同一份状态）：内建引擎 codegraph/warpgrep/web 显示连接/索引状态，「重新检测」调 `refreshMcpEngines`；外部 MCP 服务显示启用状态并提供停用/启用（写 `mcp.json` 后 `reloadPiConfig`）。「管理」直接打开设置 → MCP 标签。
+- **内建服务的开关只有一种默认：缺省 = 开**（与总开关 `mcp.enabled` 一致）。`mcp.engines[id]` 没有写过的条目以前被 `Boolean(engine.enabled)` 当成关，于是「MCP 已启用」配上一排「已关闭 / 0 个工具」，用户无法分辨是坏了还是没配——这就是那个 bug。现在只有显式的 `enabled: false` 才算关：`engines.buildEngineTargets`（`engine?.enabled === false` 才 `continue`）、`engineStates`（`enabled: engine.enabled !== false`）、`startCodegraphIndex` 三处口径必须一致，回归在 `tests/mcp-engine-defaults.test.cjs`（缺省开 / 显式关 / 建端点的同一口径）。
+- **工具数量不能再只靠 pi 的扩展上报**：`mcp-tools.json` 缓存以前只有 `desktop-mcp.js` 的 `reportTools`（`POST /tools`）在写，而默认引擎是 Prophey，它自己的循环不会经过扩展——所以内建服务全显示「0 个工具」，重启也修不回来。现在 `PropheyEngine` 在 `toolSet()` 组装完工具集后调 `options.onTools(servers)`（`reportTools()`），形状与扩展一致：MCP 工具按 `tool.source` 分组、名字去掉 `<server>__` 前缀，应用级工具（ask、子代理）归到 `desktop`；`index.ts` 的 `onTools` 把它合进同一份 `toolCache` 后 `broadcastMcpState()`。MCP 页 / 连接器卡 / 每个工具的开关都读这份缓存。回归：`tests/tool-guidance.test.cjs` 的「the prompt gives the model how to use every declared server」同时断言 `reported.codegraph/warpgrep/web/desktop` 的**裸工具名**。
 - 验证：`node scripts/test-session-panel.cjs`（真实 Electron、隔离 profile、种子事件，断言五张卡片不横向溢出、聊天区保留宽度，截图写 `artifacts/session-panel/`，含折叠态 `folded.png`）；行为回归在 `npm run test:smoke` 的 `tests/session-panel-smoke.cjs`（折叠摘要、展开后的卡片内容、注入 `contextUsage.breakdown` 后的分段条与 MCP 服务端占比、连接器「管理」跳 MCP 标签、产出与后台任务行、折叠持久化）。
 
 ## Session view, thinking, model allowlist
@@ -144,7 +146,7 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 
 - 设置弹窗可拖右下角缩放（CSS `resize: both`，最小 720×460），尺寸存 `localStorage["pi-settings-size"]`，由 `ResizeObserver` 在 400ms 防抖后写入；`SettingsModal` 常驻挂载，所以关闭再打开尺寸不会丢。
 - 服务商列表左侧的 `.provider-mark` 用**品牌图标**（`ProviderMark.tsx`）：路径来自 `@lobehub/icons-static-svg`（MIT）并**内联进源码**，不要再装那个包。图标是单色、用 `currentColor` 上色，颜色取 `--provider-color`；品牌色在黑/白主题之一会消失时（OpenAI、Kimi、Anthropic 这类近黑，Hugging Face 这类近黄）退回 `currentColor`。图标集里没有的品牌（Radius、小米）显示首字母，不要自己重画 logo。
-- MCP 页使用紧凑服务列表：默认每行只放名称、简短说明、状态、工具数量、配置入口和开关。路径、密钥、索引操作及工具明细默认折叠，配置/工具面板互斥。内置服务不要在下方外部服务列表重复显示；配置路径只在“配置文件位置”展开区显示真实路径。文案面向当前引擎，不再向用户展示 pi 启动参数或扩展注入细节。
+- MCP 页使用紧凑服务列表：默认每行只放名称、简短说明、状态、工具数量、配置入口和开关。路径、密钥、索引操作及工具明细默认折叠，配置/工具面板互斥。内置服务不要在下方外部服务列表重复显示；配置路径只在“配置文件位置”展开区显示真实路径。文案面向当前引擎，不再向用户展示 pi 启动参数或扩展注入细节。**所有 MCP 开关（总开关、内建服务开关）改完必须同时 `broadcastMcpState()`**：设置页拿到的是本次调用的返回值，而左侧会话概览的连接器卡和 App 里的共享 `mcpState` 只认 `mcp:state` 广播，漏播就会出现「设置里开了、面板还写已关闭」；`startPi()` 成功后也补一次广播，否则启动瞬间读到的空状态会一直停在屏幕上。
 
 ## 消息队列
 

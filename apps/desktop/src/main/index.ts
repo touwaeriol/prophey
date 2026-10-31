@@ -505,7 +505,20 @@ function createEngine(record?: SessionRecord): AgentEngine {
         subagentConfig().enabled ? agents.renderAgentsSection(agentSettings) : undefined,
       askModulePath: coreToolModule('ask-user.mjs'),
       mcpEndpoints: (workspace) => mcpEndpointsFor(workspace, slot.credential),
-      speedMode: () => currentSpeedMode()
+      speedMode: () => currentSpeedMode(),
+      // Same cache the pi extension fills: the settings list and the connectors card read it.
+      onTools: (servers) => {
+        const next: ToolCache = { ...toolCache }
+        let changed = false
+        for (const [server, tools] of Object.entries(servers)) {
+          const payload = JSON.stringify(tools)
+          if (JSON.stringify(next[server] ?? []) === payload) continue
+          next[server] = tools.map((tool) => ({ ...tool, enabled: true }))
+          changed = true
+        }
+        if (!changed) return
+        void saveToolCache(next).then(() => broadcastMcpState())
+      }
     })
   } else {
     engine = new PiEngine({
@@ -1307,12 +1320,12 @@ const indexedRoots = new Set<string>()
 
 function startCodegraphIndex(cwd: string): void {
   const config = engineConfig().codegraph
-  if (!config?.enabled) return
+  if (config?.enabled === false) return
   const key = path.resolve(cwd)
   if (indexedRoots.has(key)) return
   indexedRoots.add(key)
   void engines
-    .engineEntry('codegraph', config.entry?.trim() || undefined)
+    .engineEntry('codegraph', config?.entry?.trim() || undefined)
     .then((entry) => {
       if (!entry) {
         indexedRoots.delete(key)
@@ -2621,7 +2634,9 @@ function registerIpc(): void {
   handle('mcp:set-enabled', async (_event, enabled: boolean) => {
     await saveConfig({ mcp: { ...desktopConfig.mcp, enabled: Boolean(enabled) } })
     await reloadPiConfig()
-    return buildMcpState()
+    const state = await buildMcpState()
+    mainWindow?.webContents.send('mcp:state', state)
+    return state
   })
 
   handle('mcp:set-desktop-tool', async (_event, enabled: boolean) => {
@@ -2639,7 +2654,9 @@ function registerIpc(): void {
       }
     })
     await reloadPiConfig()
-    return buildMcpState()
+    const state = await buildMcpState()
+    mainWindow?.webContents.send('mcp:state', state)
+    return state
   })
 
   handle('mcp:set-engine-entry', async (_event, id: McpEngineId, entry: string | null) => {
@@ -3524,6 +3541,7 @@ app.whenReady().then(async () => {
   const savedSession = activeRecord?.path || desktopConfig.engineSessions?.[currentEngineId()]
   void startPi(cwd, savedSession ? ['--session', savedSession] : [])
     .then(() => syncAutoCompact())
+    .then(() => broadcastMcpState())
     .catch((error) => {
       setStatus({ phase: 'error', error: String(error) })
     })

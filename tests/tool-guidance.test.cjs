@@ -153,8 +153,11 @@ test('the prompt gives the model how to use every declared server', async () => 
     outfile, bundle: true, platform: 'node', packages: 'external', format: 'cjs'
   })
   const { PropheyEngine } = require(outfile)
+  /** What the engine tells the window each server offered (the「N 个工具」 counts). */
+  const reported = {}
   const engine = new PropheyEngine({
     onStatus() {}, onEvent() {}, onSettled() {},
+    onTools: (servers) => { Object.assign(reported, servers) },
     toolModulePath: path.join(root, 'packages/mcp-core/tools/workspace.mjs'),
     askModulePath: path.join(root, 'packages/mcp-core/tools/ask-user.mjs'),
     subagentModulePath: path.join(root, 'packages/mcp-core/tools/subagent.mjs'),
@@ -183,6 +186,17 @@ test('the prompt gives the model how to use every declared server', async () => 
     }
     // The pi namespacing is not how this engine names tools; mentioning it would mislead.
     assert.equal(prompt.includes('mcp__'), false)
+    // Nothing else fills the window's tool cache under this engine: the MCP page reads these counts,
+    // and it used to show 「0 个工具」 for every built-in server because only pi's extension reported.
+    assert.deepEqual(reported.codegraph?.map((tool) => tool.name).sort(), [
+      'codegraph_callers', 'codegraph_impact', 'codegraph_search'
+    ])
+    assert.deepEqual(reported.warpgrep?.map((tool) => tool.name), ['codebase_search'])
+    assert.deepEqual(reported.web?.map((tool) => tool.name), ['web_search', 'web_fetch'])
+    // App-level tools belong to the desktop server, exactly like `mcp-core`'s under pi.
+    assert.equal(reported.desktop.some((tool) => tool.name === 'ask_user_question'), true)
+    // The server is already part of the tool name in this engine; the cache wants the bare one.
+    assert.equal(reported.codegraph.some((tool) => tool.name.startsWith('codegraph__')), false)
   } finally {
     engine.dispose()
     server.close()

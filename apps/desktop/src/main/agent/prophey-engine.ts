@@ -116,6 +116,14 @@ export class PropheyEngine implements AgentEngine {
       mcpEndpoints?: (
         workspace: AgentWorkspace
       ) => Promise<Array<{ name: string; url: string; token: string; description?: string }>>
+      /**
+       * Tools each server actually offered, in the shape pi's extension posts to `/tools`.
+       *
+       * pi learns this from its own MCP clients; this engine owns the loop, so it has to say it. The
+       * window's MCP page and the connectors card read that cache — without this they showed
+       * 「0 个工具」 for every built-in server under this engine.
+       */
+      onTools?: (servers: Record<string, Array<{ name: string }>>) => void
     }
   ) {}
 
@@ -732,6 +740,7 @@ export class PropheyEngine implements AgentEngine {
     const mcp =
       endpoints && endpoints.length > 0 ? await loadMcpTools(endpoints, this.controller?.signal) : []
     this.tools = [...workspace, ...commands.tools(), ...subagents, ...ask, ...mcp]
+    this.reportTools(mcp, [...subagents, ...ask])
     if (this.options.allowedTools) {
       const aliases: Record<string, string> = {
         read: 'read_file', grep: 'grep_files', find: 'list_files', ls: 'list_files',
@@ -750,6 +759,27 @@ export class PropheyEngine implements AgentEngine {
       this.tools = this.tools.filter((tool) => tool.name === 'workspace_roots' || allowed.has(tool.name))
     }
     return this.tools
+  }
+
+  /**
+   * Publish the tool inventory the window lists (per-server counts and the per-tool switches).
+   *
+   * `this.tools` names MCP tools `<server>__<tool>` because we own the loop and the server is part of
+   * the name; the cache wants the tool's own name under its server, which is what the extension posts
+   * for pi. App-level tools (ask, subagents) belong to the desktop server, exactly like `mcp-core`'s.
+   */
+  private reportTools(mcp: CoreTool[], appTools: CoreTool[]): void {
+    const report = this.options.onTools
+    if (!report) return
+    const servers: Record<string, Array<{ name: string }>> = {}
+    for (const tool of mcp) {
+      const server = tool.source
+      if (!server || !tool.name.startsWith(server + '__')) continue
+      ;(servers[server] ??= []).push({ name: tool.name.slice(server.length + 2) })
+    }
+    if (appTools.length > 0) servers.desktop = appTools.map((tool) => ({ name: tool.name }))
+    if (Object.keys(servers).length === 0) return
+    report(servers)
   }
 
   /**

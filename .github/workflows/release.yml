@@ -20,7 +20,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Regression tests
-        run: npm test
+        shell: bash
+        # Keep the output: a failed step on its own only says "exit code 1", and reading the log of a
+        # failed run needs owner credentials. The tail below goes into the summary and the annotation,
+        # which are visible on the public run.
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+      - name: Explain a failed test run
+        if: failure()
+        shell: bash
+        run: |
+          tail -n 60 test-output.txt > tail.txt || true
+          {
+            echo '### Regression tests failed. Last 60 lines:'
+            echo
+            echo '```'
+            cat tail.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          escaped=$(sed -e 's/%/%25/g' -e 's/\r//g' tail.txt | tr '\n' ' ')
+          echo "::error title=Regression tests failed::${escaped:0:900}"
       - name: Typecheck
         run: npm run typecheck
       - name: Build renderer and main
@@ -53,3 +73,10 @@ jobs:
             release/latest.yml
             release/*.blockmap
           if-no-files-found: error
+      - name: Upload test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-test-output
+          path: test-output.txt
+          if-no-files-found: warn
