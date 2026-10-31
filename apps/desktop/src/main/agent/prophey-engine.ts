@@ -512,17 +512,17 @@ export class PropheyEngine implements AgentEngine {
       }
       if (!text.trim() && partial) text = textOf(partial)
       if (!text.trim()) throw new Error('压缩没有返回内容')
-      this.transcript = [
-        {
-          role: 'user',
-          content: `【此前对话摘要】
-${text.trim()}`,
-          timestamp: Date.now()
-        }
-      ]
+      // The summary becomes the whole conversation, and it is an ordinary user message: the window
+      // paints it as one (and can edit it) instead of keeping history the model can no longer see.
+      const summaryMessage = {
+        role: 'user',
+        content: `【此前对话摘要】\n${text.trim()}`,
+        timestamp: Date.now()
+      }
+      this.transcript = [summaryMessage]
       this.resetUsage()
       this.persist()
-      this.options.onEvent({ type: 'compaction_end', summary: text.trim() })
+      this.options.onEvent({ type: 'compaction_end', summary: text.trim(), message: summaryMessage })
       return { summary: text.trim() }
     } finally {
       this.setStatus({ compacting: false, activity: undefined })

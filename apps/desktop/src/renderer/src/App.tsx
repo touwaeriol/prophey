@@ -720,6 +720,10 @@ export default function App(): React.JSX.Element {
             .catch(() => undefined)
           void loadSessions()
           break
+        case 'compaction_end':
+          // The conversation just collapsed into one bubble; say why instead of letting it look lost.
+          if (record.message) setToast('上下文已压缩，摘要已放进对话（可以直接编辑）')
+          break
         case 'auto_retry_start':
           // Name the reason: a provider that refuses the model outright is not a blip, and
           // without its text the toast only says something failed three times in a row.

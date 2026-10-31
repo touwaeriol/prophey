@@ -145,6 +145,28 @@ interface MessagePayload {
   role?: string
   content?: unknown
   customType?: string
+  timestamp?: number
+}
+
+/**
+ * Compaction rewrites the transcript into one summary message.
+ *
+ * Engines that compact in place (Claude / Codex) hand us nothing to project and keep their own
+ * transcript, so their event is ignored; Prophey sends the summary it just stored, and the window
+ * replaces everything before it — painting turns the model can no longer see is a lie either way.
+ */
+function compactionReplaced(items: ChatItem[], message: MessagePayload | undefined, now: number): ChatItem[] {
+  if (message?.role !== 'user') return items
+  const text = textFromBlocks(message.content)
+  if (!text.trim()) return items
+  return [{
+    id: 'summary-' + now + '-' + items.length,
+    role: 'user',
+    text,
+    images: imagesFromBlocks(message.content),
+    toolCalls: [],
+    timestamp: typeof message.timestamp === 'number' ? message.timestamp : now
+  }]
 }
 
 /** Pure event projection: IPC and run timing stay in App; chat transformations stay here. */
@@ -175,6 +197,8 @@ export function applyConversationEvent(items: ChatItem[], record: Record<string,
         result: resultText(record.result),
         durationMs: typeof record.durationMs === 'number' ? record.durationMs : undefined
       }))
+    case 'compaction_end':
+      return compactionReplaced(items, record.message as MessagePayload | undefined, now)
     case 'agent_settled':
       // A bubble without its `message_end` is still a real message (the engine persisted it), so a
       // settle clears the dim rather than leaving it pending forever.

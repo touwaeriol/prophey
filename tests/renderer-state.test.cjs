@@ -90,6 +90,27 @@ test('renderer: a steered message that only now lands gets its own bubble, once'
   assert.equal(settled[0].pending, false)
 })
 
+test('renderer: compaction replaces the transcript with the summary it stored', () => {
+  let items = event([], 'message_start', { message: { role: 'user', content: '第一句' } })
+  items = event(items, 'message_end', { message: { role: 'user', content: '第一句' } })
+  items = event(items, 'message_start', { message: { role: 'assistant' } })
+  items = event(items, 'message_end', { message: { role: 'assistant', content: [{ type: 'text', text: '第一句的回答' }] } })
+  assert.equal(items.length, 2)
+  const summary = '【此前对话摘要】\n目标：修好登录。'
+  const compacted = event(items, 'compaction_end', {
+    summary: '目标：修好登录。',
+    message: { role: 'user', content: summary, timestamp: 5 }
+  })
+  assert.equal(compacted.length, 1, 'turns the model can no longer see are gone')
+  assert.equal(compacted[0].role, 'user', 'the summary is a user message, so it renders and edits like one')
+  assert.equal(compacted[0].text, summary)
+  assert.equal(compacted[0].pending, undefined)
+  assert.equal(compacted[0].timestamp, 5)
+  // Engines that compact privately (Claude / Codex) carry no message: their transcript stays theirs.
+  assert.equal(event(items, 'compaction_end', {}).length, 2)
+  assert.equal(event(items, 'compaction_end', { message: { role: 'user', content: '   ' } }).length, 2, 'an empty summary never wipes the window')
+})
+
 test('renderer: tool completion preserves arguments and survives final assistant snapshot', () => {
   let items = event([], 'message_start', { message: { role: 'assistant' } })
   items = event(items, 'tool_execution_start', { toolCallId: 'tool-1', toolName: 'Read', args: { path: 'file.ts' } })

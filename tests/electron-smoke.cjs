@@ -121,6 +121,7 @@ app.on('browser-window-created', (_event, window) => {
       await require('./image-copy-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./video-smoke.cjs')(evaluate, until, window)
       await require('./session-messages-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
+      await require('./compaction-summary-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./long-message-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./session-isolation-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./queue-smoke.cjs')(evaluate, until, window)
@@ -131,7 +132,7 @@ app.on('browser-window-created', (_event, window) => {
       await require('./warpgrep-card-smoke.cjs')(evaluate, until)
       const version = (await evaluate('window.pi.getUpdateSnapshot()')).currentVersion
       assert.equal(version, require(path.join(desktop, 'package.json')).version)
-      console.log('Electron smoke passed: isolated startup, IPC, compaction, command menus, settings, dismissal, pi/Prophey switching, version ' + version)
+      console.log('Electron smoke passed: isolated startup, IPC, compaction, compaction summary, command menus, settings, dismissal, pi/Prophey switching, version ' + version)
       app.quit()
     } catch (error) {
       console.error(error)
