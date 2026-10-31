@@ -491,7 +491,7 @@ export class PropheyEngine implements AgentEngine {
     this.setStatus({ compacting: true, activity: { label: '正在压缩上下文', since: Date.now() } })
     this.options.onEvent({ type: 'compaction_start', reason: 'manual' })
     try {
-      const stream = guardedStream<Record<string, unknown>>(signal => runtime.streamSimple(
+      const answer = (await runtime.completeSimple(
         model,
         {
           systemPrompt:
@@ -505,21 +505,18 @@ export class PropheyEngine implements AgentEngine {
               : ''),
           messages: orderToolResults(structuredClone(this.transcript)) as never
         },
-        { signal }
-      ) as AsyncIterable<Record<string, unknown>>, this.controller.signal, this.options.streamIdleTimeoutMs ?? 180_000)
-      let text = ''
-      let partial: Record<string, unknown> | undefined
-      for await (const event of stream as AsyncIterable<Record<string, unknown>>) {
-        if (event.type === 'text_delta') {
-          partial = event.partial as Record<string, unknown>
-        }
-        if (event.type === 'text_end')
-          text = String((event as { content?: unknown }).content ?? text)
-        if (event.type === 'done' && event.message) text = textOf(event.message as Record<string, unknown>)
-        if (event.type === 'error') throw new Error(describeError(event.error))
+        { signal: this.controller.signal }
+      )) as unknown as Record<string, unknown>
+      const text = textOf(answer)
+      if (!text.trim()) {
+        // Say what the provider said. "The model returned nothing" hid a 503 model_not_found once
+        // already; an empty summary must not do it again.
+        throw new Error(
+          answer.stopReason === 'error' || answer.errorMessage
+            ? describeError(answer)
+            : '压缩没有返回内容。模型可能只回了思考过程，换一个模型或重试一次'
+        )
       }
-      if (!text.trim() && partial) text = textOf(partial)
-      if (!text.trim()) throw new Error('压缩没有返回内容')
       // The summary becomes the whole conversation, and it is an ordinary user message: the window
       // paints it as one (and can edit it) instead of keeping history the model can no longer see.
       const summaryMessage = {

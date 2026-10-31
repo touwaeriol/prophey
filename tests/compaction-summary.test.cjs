@@ -17,17 +17,37 @@ test('compaction: the stored summary and the event agree, and the old turns are 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'prophey-compaction-'))
   const requests = []
   let reply = '好的，我来改。'
+  let failing = false
   const server = http.createServer((req, res) => {
     let raw = ''
     req.on('data', (chunk) => { raw += chunk })
     req.on('end', () => {
       requests.push({ url: new URL(req.url, 'http://localhost').pathname, body: JSON.parse(raw) })
+      if (failing) {
+        res.writeHead(503, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: { code: 'model_not_found', message: '分组下模型无可用渠道（distributor）' } }))
+        return
+      }
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       const event = (data) => res.write('event: ' + data.type + '\ndata: ' + JSON.stringify(data) + '\n\n')
+      // A compaction request answers like a reasoning model: thinking streams first, then the summary
+      // as a text block. Building the summary from "the first text block only" would now be wrong on
+      // purpose — the point is that the answer is read from the finished message, not reassembled
+      // from whichever event happened to carry it.
+      const compacting = raw.includes('你在压缩一段编码会话的上下文')
       event({ type: 'message_start', message: { id: 'msg_proof', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 0 } } })
-      event({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
-      event({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: reply } })
-      event({ type: 'content_block_stop', index: 0 })
+      if (compacting) {
+        event({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } })
+        event({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '先想一下要点…' } })
+        event({ type: 'content_block_stop', index: 0 })
+        event({ type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } })
+        event({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: reply } })
+        event({ type: 'content_block_stop', index: 1 })
+      } else {
+        event({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
+        event({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: reply } })
+        event({ type: 'content_block_stop', index: 0 })
+      }
       event({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } })
       event({ type: 'message_stop' })
       res.end()
@@ -96,6 +116,14 @@ test('compaction: the stored summary and the event agree, and the old turns are 
     // The summary request saw the conversation that is being replaced.
     assert.match(JSON.stringify(requests.at(-1).body), /帮我改一下登录界面的错误提示/)
     assert.match(JSON.stringify(requests.at(-1).body), /你在压缩一段编码会话的上下文/)
+
+    // A provider that refuses (no key, no channel, bad model) must say so: 「压缩没有返回内容」 hid a
+    // real 503 once already, and an empty summary is exactly where it can happen again.
+    reply = ''
+    failing = true
+    await assert.rejects(() => engine.compact(), /model_not_found|503|无可用渠道/, 'the provider reason survives')
+    failing = false
+
   } finally {
     engine?.dispose()
     server.closeAllConnections()

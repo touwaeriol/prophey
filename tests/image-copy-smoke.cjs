@@ -73,6 +73,28 @@ module.exports = async function imageCopySmoke(evaluate, until, window, setSessi
     await evaluate('document.querySelector(".composer textarea").focus()')
     await shortcut('V', 'paste')
     await until(() => evaluate('document.querySelectorAll(".draft-image").length === 1'), 'native image paste')
+    // An attachment can be copied without opening it: right-click it in the composer.
+    clipboard.clear()
+    await evaluate(`(() => {
+      const thumb = document.querySelector('.draft-image-thumb')
+      const rect = thumb.getBoundingClientRect()
+      thumb.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true,
+        clientX: Math.round(rect.left + rect.width / 2),
+        clientY: Math.round(rect.top + rect.height / 2)
+      }))
+    })()`)
+    await until(() => evaluate('!!document.querySelector(".image-context-menu")'), 'draft thumbnail menu')
+    assert.equal(await evaluate('!!document.querySelector(".image-lightbox")'), false, 'the menu needs no preview')
+    assert.equal(
+      await evaluate('document.querySelector(".image-context-menu button span").textContent'),
+      '复制图片'
+    )
+    await evaluate('document.querySelector(".image-context-menu button").click()')
+    await until(() => evaluate('document.querySelector(".image-context-menu button span")?.textContent === "已复制"'), 'draft copy feedback')
+    await assertClipboard('draft thumbnail context menu')
+    await until(() => evaluate('!document.querySelector(".image-context-menu")'), 'draft menu closes itself')
+    assert.equal(await evaluate('!!document.querySelector(".image-lightbox")'), false, 'still no preview')
     await openPreview()
     clipboard.clear()
     assert.equal(await clipboard.has('image/png'), false)

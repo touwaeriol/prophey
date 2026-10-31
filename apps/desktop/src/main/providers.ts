@@ -77,7 +77,7 @@ export function getRuntime(): Promise<ModelRuntime> {
       // A Base URL without `/v1` is the user's choice to keep: requests are made as typed and retried
       // once with the version segment when the gateway answers with a web page. One wrapper covers
       // every model request the app makes (chat, compaction, titles, suggestions).
-      for (const method of ['streamSimple', 'stream'] as const) {
+      for (const method of ['streamSimple', 'stream', 'completeSimple'] as const) {
         const original = runtime[method].bind(runtime) as (...args: unknown[]) => unknown
         ;(runtime as unknown as Record<string, unknown>)[method] = (
           model: { provider?: string },

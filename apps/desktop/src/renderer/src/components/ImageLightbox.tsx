@@ -302,6 +302,13 @@ export function MessageImages({
   )
 }
 
+/**
+ * Attachments waiting in the composer (and in the message editor).
+ *
+ * Right-click copies one without opening it first: an attachment is already the full-resolution
+ * image, and 「打开 → 复制 → 关闭」 is three steps for something the user can see right there. Same
+ * menu as the transcript's thumbnails, so there is one way to copy an image in the whole app.
+ */
 export function DraftImageStrip({
   images,
   onRemove,
@@ -311,29 +318,106 @@ export function DraftImageStrip({
   onRemove: (id: string) => void
   onPreview: (image: DraftImage) => void
 }): React.JSX.Element | null {
+  const [menu, setMenu] = useState<{ x: number; y: number; target: HTMLImageElement }>()
+  const [copyState, setCopyState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle')
+  const [error, setError] = useState('')
+  const copyingRef = useRef(false)
+  const closeMenu = useCallback(() => {
+    setMenu(undefined)
+    setCopyState('idle')
+    setError('')
+  }, [])
+
+  const copy = useCallback(async (target: HTMLImageElement): Promise<void> => {
+    if (copyingRef.current) return
+    copyingRef.current = true
+    setCopyState('copying')
+    setError('')
+    try {
+      await copyPreviewImage(target)
+      setCopyState('copied')
+    } catch (reason) {
+      setCopyState('error')
+      setError(reason instanceof Error ? reason.message : '复制图片失败，请重试')
+    } finally {
+      copyingRef.current = false
+    }
+  }, [])
+
+  useDismissMenu(menu !== undefined, closeMenu)
+
+  useEffect(() => {
+    if (copyState !== 'copied') return
+    const timer = window.setTimeout(closeMenu, 2000)
+    return () => window.clearTimeout(timer)
+  }, [copyState, closeMenu])
+
+  useEffect(() => {
+    if (!menu) return
+    const handler = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        closeMenu()
+      } else if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        event.stopPropagation()
+        void copy(menu.target)
+      }
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [menu, copy, closeMenu])
+
   if (images.length === 0) return null
   return (
-    <div className="draft-images">
-      {images.map((image) => (
-        <div key={image.id} className="draft-image">
-          <button
-            className="draft-image-thumb"
-            onClick={() => onPreview(image)}
-            title={image.video
-              ? `${image.name} · ${image.video.time.toFixed(1)} 秒`
-              : image.name ? `查看大图：${image.name}` : '点击查看大图'}
-          >
-            <img src={imageSrc(image)} alt="" />
-          </button>
-          <button
-            className="draft-image-remove"
-            onClick={() => onRemove(image.id)}
-            title="移除图片"
-          >
-            <CloseIcon size={10} />
-          </button>
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="draft-images">
+        {images.map((image) => (
+          <div key={image.id} className="draft-image">
+            <button
+              className="draft-image-thumb"
+              onClick={() => onPreview(image)}
+              onContextMenu={(event) => {
+                // Right-click copies the attachment itself, no preview needed.
+                event.preventDefault()
+                event.stopPropagation()
+                const target = event.currentTarget.querySelector('img')
+                setCopyState('idle')
+                setError('')
+                if (target) setMenu({ x: event.clientX, y: event.clientY, target })
+              }}
+              title={image.video
+                ? `${image.name} · ${image.video.time.toFixed(1)} 秒 · 右键可复制图片`
+                : `${image.name ? `查看大图：${image.name}` : '点击查看大图'} · 右键可复制图片`}
+            >
+              <img src={imageSrc(image)} alt="" />
+            </button>
+            <button
+              className="draft-image-remove"
+              onClick={() => onRemove(image.id)}
+              title="移除图片"
+            >
+              <CloseIcon size={10} />
+            </button>
+          </div>
+        ))}
+      </div>
+      {menu && (
+        <ImageContextMenu
+          x={menu.x}
+          y={menu.y}
+          note={error}
+          entries={[
+            {
+              label: copyState === 'copied' ? '已复制' : copyState === 'copying' ? '复制中…' : '复制图片',
+              hint: COPY_HINT,
+              disabled: copyState === 'copying',
+              onSelect: () => void copy(menu.target)
+            }
+          ]}
+        />
+      )}
+    </>
   )
 }

@@ -696,6 +696,16 @@ export default function App(): React.JSX.Element {
         case 'agent_start':
           setRun({ startedAt: Date.now(), runningTools: 0 })
           break
+        case 'compaction_start':
+          // /compact started while nothing was running: give the status bar a clock to tick.
+          setRun((prev) =>
+            prev.startedAt && !prev.endedAt ? prev : { startedAt: Date.now(), runningTools: 0 }
+          )
+          break
+        case 'compaction_end':
+          // The summary is done; a later auto_retry or queue flush starts its own run.
+          setRun((prev) => ({ ...prev, endedAt: prev.startedAt ? Date.now() : prev.endedAt }))
+          break
         case 'tool_execution_start':
           setRun((prev) => ({ ...prev, runningTools: prev.runningTools + 1 }))
           break
