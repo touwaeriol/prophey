@@ -614,7 +614,10 @@ export function SettingsModal({
         detail: error instanceof Error ? error.message : String(error)
       }))
     setProviderTests((prev) => ({ ...prev, [provider.id]: { busy: false, result } }))
-  }, [])
+    // A test can repair the address (a missing `/v1` is filled in and the same request retried), so
+    // the row has to follow what is on disk now instead of the value it was rendered with.
+    if (result.ok && result.detail) void loadProviders()
+  }, [loadProviders])
 
   const logout = useCallback(async (provider: ProviderInfo) => {
       if (confirmLogout !== provider.id) {
@@ -917,6 +920,12 @@ export function SettingsModal({
                                 providerTests[provider.id].result?.model ?? ''
                               }`
                             : `测试失败：${providerTests[provider.id].result?.detail ?? ''}`}
+                          {providerTests[provider.id].result?.ok &&
+                            providerTests[provider.id].result?.detail && (
+                              <span className="provider-test-note">
+                                {providerTests[provider.id].result?.detail}
+                              </span>
+                            )}
                           {!providerTests[provider.id].result?.ok &&
                             (providerTests[provider.id].result?.available?.length ?? 0) > 0 && (
                               <span className="provider-test-models">

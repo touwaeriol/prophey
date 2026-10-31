@@ -1919,6 +1919,8 @@ async function reloadPiConfig(): Promise<void> {
     return
   }
   configPending = false
+  // Every restart is a fresh chance to fix a bare OpenAI-compatible Base URL before pi reads it.
+  await providers.normalizeModelsJsonFile().catch(() => undefined)
   await startPi(status.cwd, sessionArgs())
 }
 
@@ -3499,6 +3501,9 @@ app.whenReady().then(async () => {
     'script=',
     mcpServerScript()
   )
+  // A Base URL saved without `/v1` still works: fill it in before any engine reads the file, so the
+  // pi CLI (which only reads it at process start) gets the corrected address as well.
+  await providers.normalizeModelsJsonFile().catch(() => undefined)
   // Warm the model runtime in the background so the first Settings open is instant.
   await refreshAgents()
   // Restores the subagent records of previous runs, so the panel and the tools can query them.

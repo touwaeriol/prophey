@@ -93,14 +93,46 @@ function configure(basePath, modelId) {
   providers.invalidateCache()
 }
 
-test('a Base URL without a path is reported as a web page, not a protocol problem', async () => {
+test('a Base URL without a path gets its /v1 before the request leaves', async () => {
+  // Hand the runtime the bare spelling, the way an older version wrote it.
   configure('', 'deepseek-flash')
-  handler = () => ({ status: 200, type: 'text/html', body: '<!doctype html><html><body>gateway</body></html>' })
+  requests.length = 0
+  handler = (request) => (request.url === '/v1/chat/completions'
+    ? {
+        status: 200,
+        type: 'text/event-stream',
+        body: 'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"OK"}}]}\n\n' +
+          'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n' +
+          'data: [DONE]\n\n'
+      }
+    : { status: 200, type: 'text/html', body: '<!doctype html><html><body>gateway</body></html>' })
   const result = await providers.testProvider('local')
-  assert.equal(result.ok, false)
-  assert.match(result.detail ?? '', /少了 \/v1/)
-  // The adapter really did ask the host root for a completion: that is the bug being reported.
-  assert(requests.some((entry) => entry.url === '/chat/completions'), JSON.stringify(requests.map(r => r.url)))
+  assert.equal(result.ok, true, result.detail)
+  // Nothing was ever asked for `/chat/completions` at the host root: the missing segment was filled in.
+  assert(requests.every((entry) => entry.url !== '/chat/completions'), JSON.stringify(requests.map(r => r.url)))
+  assert(requests.some((entry) => entry.url === '/v1/chat/completions'), JSON.stringify(requests.map(r => r.url)))
+  assert.equal(result.detail, '已自动补全 /v1：http://127.0.0.1:' + port + '/v1', 'the row says what it changed')
+  // The fix is on disk, so pi and every later start read the same URL.
+  const written = JSON.parse(fs.readFileSync(path.join(agentDir, 'models.json'), 'utf8'))
+  assert.equal(written.providers.local.baseUrl, 'http://127.0.0.1:' + port + '/v1')
+})
+
+test('a bare Base URL written while the app runs is repaired at read time and at test time', async () => {
+  // Warm the runtime against the corrected address, then simulate a hand edit that puts the bare one
+  // back: the cached runtime is stale now, exactly like a models.json edited outside the editor.
+  configure('/v1', 'deepseek-flash')
+  await providers.listProviders()
+  const bare = JSON.parse(fs.readFileSync(path.join(agentDir, 'models.json'), 'utf8'))
+  bare.providers.local.baseUrl = 'http://127.0.0.1:' + port
+  fs.writeFileSync(path.join(agentDir, 'models.json'), JSON.stringify(bare))
+  requests.length = 0
+  handler = () => ({ status: 200, type: 'text/html', body: '<!doctype html><html><body>gateway</body></html>' })
+  const fixed = await providers.normalizeModelsJsonFile()
+  assert.deepEqual(fixed, { local: 'http://127.0.0.1:' + port + '/v1' })
+  const written = JSON.parse(fs.readFileSync(path.join(agentDir, 'models.json'), 'utf8'))
+  assert.equal(written.providers.local.baseUrl, 'http://127.0.0.1:' + port + '/v1')
+  // Idempotent: a file that already carries the version segment is not rewritten.
+  assert.deepEqual(await providers.normalizeModelsJsonFile(), {})
 })
 
 test('a model the channel does not sell names the ids it does sell', async () => {

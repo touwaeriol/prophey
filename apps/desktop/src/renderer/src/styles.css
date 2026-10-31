@@ -2537,6 +2537,12 @@ body.resizing-sidebar * {
   word-break: break-all;
 }
 
+/* A repair the test made by itself is a note, not a warning: it stays muted next to the success line. */
+.provider-test-note {
+  color: var(--text-faint);
+  word-break: break-all;
+}
+
 /* ChatGPT plan windows under an OpenAI row: numbers from the Codex login, link to ChatGPT's page. */
 .provider-usage {
   display: flex;
