@@ -60,6 +60,17 @@ export function pathKey(dir: string): string {
   return /^[A-Za-z]:/.test(dir) || dir.includes('\\') ? dir.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase() : dir
 }
 
+/**
+ * The order a session list falls back to: the user's chosen sort key.
+ *
+ * Shared with the sidebar so the manual order can be reconciled against the same list the groups
+ * see — otherwise a new session would sort in at a different place than the one it was inserted at.
+ */
+export function sortSessions(list: SessionSummary[], sort: SortMode): SessionSummary[] {
+  return [...list].sort((a, b) => sort === 'name' ? a.title.localeCompare(b.title, 'zh-CN') :
+    sort === 'created' ? b.createdAt - a.createdAt : b.updatedAt - a.updatedAt)
+}
+
 interface GroupOptions {
   sessions: SessionSummary[]
   pinned: string[]
@@ -70,11 +81,18 @@ interface GroupOptions {
   cwd: string
   activeProject?: Project
   projects?: Project[]
+  /**
+   * Where the user dragged each session, as a rank per path.
+   *
+   * Rows keep this order for good: switching, running or renaming a session never moves it. Only a
+   * drag (or a change of sort key, which drops the manual order) rearranges the list.
+   */
+  order?: Map<string, number>
 }
 
 /** View policy shared by every grouping mode, independent of DOM and persisted preferences. */
 export function buildSessionGroups({
-  sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd, activeProject, projects = []
+  sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd, activeProject, projects = [], order
 }: GroupOptions): SessionGroup[] {
   const catalogue = new Map(projects.map(project => [project.id, project]))
   if (activeProject) catalogue.set(activeProject.id, activeProject)
@@ -115,6 +133,12 @@ export function buildSessionGroups({
     })
     filtered.sort((a, b) => prefs.sort === 'name' ? a.title.localeCompare(b.title, 'zh-CN') :
       prefs.sort === 'created' ? b.createdAt - a.createdAt : b.updatedAt - a.updatedAt)
+    // The manual order wins: a row the user placed stays there while sessions open, run and get
+    // renamed. Rank-less rows (brand new, or before the first drag) fall back to the sort key.
+    if (order) {
+      const rank = (session: SessionSummary): number => order.get(session.path) ?? Number.MAX_SAFE_INTEGER
+      filtered.sort((a, b) => rank(a) - rank(b))
+    }
     // Rows keep the order of their own sort key. Opening a session must not lift it to the top of
     // its directory — a list that rearranges under the cursor is the bug, not a feature. Sessions
     // past the first page are revealed by expanding the group (see the active-session effect in

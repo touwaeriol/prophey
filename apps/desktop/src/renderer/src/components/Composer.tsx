@@ -65,6 +65,7 @@ export function Composer({
   onQueueSendNow,
   onNotice,
   onSend,
+  onRunCommand,
   onStop,
   streaming,
   disabled,
@@ -89,6 +90,11 @@ export function Composer({
   onQueueSendNow: (id: string) => void
   onNotice?: (message: string) => void
   onSend: (mode: 'send' | 'steer') => void
+  /**
+   * Run a picked slash command on the spot. Only commands that take no arguments come here: the
+   * composer decides *when* a command runs, `runCommand` decides what it does.
+   */
+  onRunCommand?: (text: string) => void
   onStop: () => void
   streaming: boolean
   disabled: boolean
@@ -455,7 +461,9 @@ export function Composer({
                 className={`slash-item ${index === Math.min(slashIndex, slashMatches.length - 1) ? 'active' : ''}`}
                 onMouseDown={(event) => {
                   event.preventDefault()
-                  applyCommand(command.name, command.args)
+                  // Same rule as Enter: picking a command that takes nothing runs it.
+                  if (!command.args && onRunCommand) onRunCommand(command.name)
+                  else applyCommand(command.name, command.args)
                 }}
               >
                 <span className="slash-name">
@@ -530,6 +538,13 @@ export function Composer({
                 if (event.key === 'Enter' || event.key === 'Tab') {
                   event.preventDefault()
                   const command = slashMatches[Math.min(slashIndex, slashMatches.length - 1)]
+                  // Enter runs a command that takes nothing. Filling the box and waiting for a second
+                  // Enter made `/clear` and `/status` look broken. A command with arguments still
+                  // fills the box (Tab completes any of them), so `[提示词]` can be typed first.
+                  if (event.key === 'Enter' && !command.args && !event.nativeEvent.isComposing) {
+                    onRunCommand?.(command.name)
+                    return
+                  }
                   applyCommand(command.name, command.args)
                   return
                 }

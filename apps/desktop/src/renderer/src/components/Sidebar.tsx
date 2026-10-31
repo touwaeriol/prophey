@@ -22,9 +22,10 @@ import {
   SunIcon
 } from './Icons'
 import {
-  buildSessionGroups, baseName, pathKey, startOfDay,
+  buildSessionGroups, baseName, pathKey, sortSessions, startOfDay,
   type Prefs, type StatusFilter, type EnvironmentFilter, type GroupMode, type SortMode
 } from '../lib/session-groups'
+import { moveSession, rankOrder, reconcileOrder } from '../lib/session-order'
 
 const PAGE_SIZE = 10
 const MIN_SIDEBAR_WIDTH = 220
@@ -67,6 +68,8 @@ function startResize(
 const PREFS_KEY = 'pi-sidebar-prefs'
 const ARCHIVE_KEY = 'pi-archived-sessions'
 const PINNED_KEY = 'pi-pinned-sessions'
+/** The row order the user arranged by dragging. Persisted, so it survives a restart. */
+const ORDER_KEY = 'pi-session-order'
 
 const DEFAULT_PREFS: Prefs = {
   environment: 'all',
@@ -139,6 +142,17 @@ function loadArchived(): Set<string> {
 function loadPinned(): string[] {
   try {
     const raw = JSON.parse(localStorage.getItem(PINNED_KEY) ?? '[]') as unknown
+    return Array.isArray(raw)
+      ? raw.filter((value): value is string => typeof value === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+
+function loadOrder(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(ORDER_KEY) ?? '[]') as unknown
     return Array.isArray(raw)
       ? raw.filter((value): value is string => typeof value === 'string')
       : []
@@ -230,6 +244,9 @@ export function Sidebar({
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs)
   const [archived, setArchived] = useState<Set<string>>(loadArchived)
   const [pinned, setPinned] = useState<string[]>(loadPinned)
+  const [order, setOrder] = useState<string[]>(loadOrder)
+  const [dragFrom, setDragFrom] = useState<string>()
+  const [dropTarget, setDropTarget] = useState<{ path: string; after: boolean }>()
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('prophey-sidebar-collapsed') ?? '[]')) } catch { return new Set() }
@@ -256,6 +273,11 @@ export function Sidebar({
     (isSelected(session) && !!(status.isStreaming || status.compacting || status.backgroundTasks?.length))
 
   const updatePrefs = (patch: Partial<Prefs>): void => {
+    // Picking a different sort key is the user asking for that order, so the arranged one is spent.
+    if (patch.sort && patch.sort !== prefs.sort) {
+      setOrder([])
+      localStorage.removeItem(ORDER_KEY)
+    }
     setPrefs((prev) => {
       const next = { ...prev, ...patch }
       localStorage.setItem(PREFS_KEY, JSON.stringify(next))
@@ -360,11 +382,39 @@ export function Sidebar({
     return () => document.removeEventListener('mousedown', onMouseDown)
   }, [moreOpen])
 
+  /**
+   * Fold the sessions that are present into the arranged order, once per list change.
+   *
+   * A session seen for the first time sorts in by the chosen key at the place it would have had;
+   * everything the user placed stays exactly where it is. This is the only place the order grows or
+   * shrinks, which is why opening, running or renaming a session never moves a row.
+   */
+  useEffect(() => {
+    const sorted = sortSessions(sessions, prefs.sort).map((session) => session.path)
+    setOrder((prev) => {
+      const next = reconcileOrder(prev, sorted)
+      if (next.length === prev.length && next.every((path, index) => path === prev[index])) return prev
+      localStorage.setItem(ORDER_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [sessions, prefs.sort])
+
+  const dropSession = (target: string, after: boolean): void => {
+    const from = dragFrom
+    setDragFrom(undefined)
+    setDropTarget(undefined)
+    if (!from || from === target) return
+    const next = moveSession(order, from, target, after ? 'after' : 'before')
+    setOrder(next)
+    localStorage.setItem(ORDER_KEY, JSON.stringify(next))
+  }
+
   const groups = useMemo(
     () => buildSessionGroups({
-      sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd: status.cwd, activeProject, projects
+      sessions, pinned, prefs, archived, projectStatus, projectQueries, cwd: status.cwd, activeProject, projects,
+      order: rankOrder(order)
     }),
-    [sessions, pinned, prefs, archived, projectStatus, projectQueries, status.cwd, activeProject, projects]
+    [sessions, pinned, prefs, archived, projectStatus, projectQueries, status.cwd, activeProject, projects, order]
   )
 
   useEffect(() => {
@@ -867,7 +917,40 @@ export function Sidebar({
                         key={session.path}
                         className={`session-item ${isSelected(session) ? 'active' : ''} ${isRunning(session) ? 'running' : ''} ${
                           isArchived ? 'archived' : ''
+                        } ${
+                          dropTarget?.path === session.path ? (dropTarget.after ? 'drop-after' : 'drop-before') : ''
+                        } ${
+                          dragFrom === session.path ? 'dragging' : ''
                         }`}
+                        draggable
+                        onDragStart={(event) => {
+                          setDragFrom(session.path)
+                          event.dataTransfer.effectAllowed = 'move'
+                          // Firefox refuses to start a drag without payload.
+                          event.dataTransfer.setData('text/plain', session.path)
+                        }}
+                        onDragOver={(event) => {
+                          if (!dragFrom || dragFrom === session.path) return
+                          event.preventDefault()
+                          event.dataTransfer.dropEffect = 'move'
+                          const rect = event.currentTarget.getBoundingClientRect()
+                          const after = event.clientY > rect.top + rect.height / 2
+                          setDropTarget((prev) =>
+                            prev?.path === session.path && prev.after === after ? prev : { path: session.path, after }
+                          )
+                        }}
+                        onDragLeave={() =>
+                          setDropTarget((prev) => (prev?.path === session.path ? undefined : prev))
+                        }
+                        onDragEnd={() => {
+                          setDragFrom(undefined)
+                          setDropTarget(undefined)
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault()
+                          const rect = event.currentTarget.getBoundingClientRect()
+                          dropSession(session.path, event.clientY > rect.top + rect.height / 2)
+                        }}
                         role="button"
                         tabIndex={0}
                         title={`${session.title}\n${session.cwd}\n${engineLabel(session.engine)} · ${formatTime(session.updatedAt)}${isArchived ? ' · 已归档' : ''}`}

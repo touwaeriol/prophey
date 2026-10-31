@@ -26,6 +26,10 @@ async function until(probe, label) {
 }
 app.on('browser-window-created', (_event, window) => {
   window.webContents.setBackgroundThrottling(false)
+  // A crash in the renderer otherwise reads only as "timed out waiting for the composer".
+  window.webContents.on('console-message', (event) => {
+    if (event.level === 'error' || event.level === 'warning') console.error('[renderer]', event.message)
+  })
   window.webContents.once('did-finish-load', async () => {
     const evaluate = source => window.webContents.executeJavaScript(source).catch(error => {
       throw Error(`${error.message}\nRenderer script: ${source}`)
@@ -122,7 +126,9 @@ app.on('browser-window-created', (_event, window) => {
       await require('./video-smoke.cjs')(evaluate, until, window)
       await require('./session-messages-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./compaction-summary-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
+      await require('./conversation-perf-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./compaction-clock-smoke.cjs')(evaluate, until, window)
+      await require('./slash-enter-smoke.cjs')(evaluate, until, window)
       await require('./long-message-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./session-isolation-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./queue-smoke.cjs')(evaluate, until, window)

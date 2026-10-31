@@ -287,7 +287,13 @@ export default function App(): React.JSX.Element {
   const [taskTarget, setTaskTarget] = useState<TaskTarget | undefined>(undefined)
   const [subagentFocus, setSubagentFocus] = useState<string | undefined>(undefined)
   const [allSubagents, setSubagents] = useState<SubagentView[]>([])
-  const subagents = allSubagents.filter(record => record.parentSession && messagesBelong(record.parentSession, status))
+  const subagents = useMemo(
+    () => allSubagents.filter(record => record.parentSession && messagesBelong(record.parentSession, status)),
+    // A new array per status broadcast would re-render every message on screen for nothing; the
+    // filter only depends on which session is on screen.
+    [allSubagents, status.sessionKey, status.sessionFile, status.engine]
+  )
+
   const [mcpState, setMcpState] = useState<McpState | undefined>(undefined)
   /** Context-window usage of the current session, shown next to the composer. */
   const [contextUsage, setContextUsage] = useState<ContextUsage | undefined>(undefined)
@@ -398,6 +404,17 @@ export default function App(): React.JSX.Element {
   stickRef.current = stick
   /** Where each conversation was left, so reopening it lands on the same line (see lib/session-scroll). */
   const scrollMemory = useRef<SessionScrollMap>(new Map())
+
+  /**
+   * The line the reader was last on in this conversation.
+   *
+   * Handing it to the transcript lets the window open around that message instead of only showing
+   * the tail, so reopening a long session lands where it was left rather than at the bottom.
+   */
+  const scrollAnchorId = useMemo(
+    () => recallScroll(scrollMemory.current, status.sessionKey ?? status.sessionFile)?.anchorId,
+    [status.sessionKey, status.sessionFile]
+  )
   /** A restore waiting for the incoming transcript to render; cleared once it is applied. */
   const pendingScroll = useRef<{ key: string; scroll: SessionScroll } | null>(null)
 
@@ -648,10 +665,11 @@ export default function App(): React.JSX.Element {
       if (!isCurrent() || !messagesBelong(stats?.sessionKey, owner)) return
       // Reopening a session that kept running in the background: the run already started, so the
       // status bar has to keep counting instead of disappearing until the next `agent_start`.
+      // Compaction is the same strip and the engine keeps compacting while parked, so it counts as
+      // running too — otherwise a session that is halfway through a summary opens on a dead clock.
+      const live = statusRef.current.isStreaming || statusRef.current.compacting
       setRun({
-        ...(statusRef.current.isStreaming
-          ? { startedAt: statusRef.current.activity?.since ?? Date.now() }
-          : {}),
+        ...(live ? { startedAt: statusRef.current.activity?.since ?? Date.now() } : {}),
         runningTools: 0,
         tokens: stats?.tokens?.total
       })
@@ -855,7 +873,14 @@ export default function App(): React.JSX.Element {
     shownSession.current = key
     setItems([])
     setContextUsage(undefined)
-    setRun({ runningTools: 0 })
+    // Seed the clock from the incoming status. A parked session is still streaming or compacting
+    // while the window looks elsewhere, and its `activity.since` is the moment that work began:
+    // without this the strip came back as `0s` and loadMessages had to put the start back later.
+    setRun(
+      status.isStreaming || status.compacting
+        ? { startedAt: status.activity?.since ?? Date.now(), runningTools: 0 }
+        : { runningTools: 0 }
+    )
     setSubagentsOpen(false)
     setSubagentFocus(undefined)
     setCommandOutput(undefined)
@@ -1114,6 +1139,11 @@ export default function App(): React.JSX.Element {
     [activeComposerKey, loadMessages]
   )
 
+  /** Stable, so a settled user bubble is not re-rendered — and re-parsed — on every status tick. */
+  const onEditTurn = useCallback(
+    (index: number, text: string, images: DraftImage[]) => void editTurn(index, text, images),
+    [editTurn]
+  )
   /** Runs a desktop slash command; returns true when the text was consumed. */
 
   /**
@@ -1282,6 +1312,25 @@ export default function App(): React.JSX.Element {
       }
     },
     [closeBtw, loadMessages, newSession, piBusy, queueCommand, engineCommands]
+  )
+
+  /**
+   * Enter on a command that takes no arguments runs it instead of only filling the box.
+   *
+   * Same door as a typed command — `runCommand` parses and dispatches — so the draft is cleared only
+   * here, after the guards: a refused run must not eat what the user typed.
+   */
+  const runSlashCommand = useCallback(
+    (text: string) => {
+      if (statusRef.current.switchingEngine || activeComposerKey !== composerKeyRef.current) return
+      setSuggestion(null)
+      setDraft('')
+      setDraftImages([])
+      void runCommand(text).catch((error) =>
+        setToast(error instanceof Error ? error.message : String(error))
+      )
+    },
+    [activeComposerKey, runCommand, setDraft, setDraftImages]
   )
 
   /**
@@ -1664,12 +1713,15 @@ export default function App(): React.JSX.Element {
               >
                 <Conversation
                   items={items}
+                  sessionKey={activeComposerKey}
+                  anchorId={scrollAnchorId}
+                  scrollRef={scrollRef}
                   workspace={status.cwd}
                   connected={status.phase === 'ready'}
                   loggedIn={Boolean(status.model)}
                   subagents={subagents}
                   onOpenSubagent={openSubagents}
-                  onEditTurn={(index, text, images) => void editTurn(index, text, images)}
+                  onEditTurn={onEditTurn}
                   onSuggestion={(text) => {
                     setDraft(text)
                     requestAnimationFrame(() => {
@@ -1711,6 +1763,7 @@ export default function App(): React.JSX.Element {
               commands={engineCommands}
               value={draft}
               onChange={setDraft}
+              onRunCommand={runSlashCommand}
               suggestion={suggestion && suggestion.key === activeComposerKey ? suggestion.text : undefined}
               onSuggestionUsed={() => setSuggestion(null)}
               images={draftImages}

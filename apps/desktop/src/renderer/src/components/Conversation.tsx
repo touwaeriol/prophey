@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { SubagentView } from '@shared/types'
 import type { ChatItem, MessageImage, ToolCallView } from '../lib/messages'
 import { Markdown } from './Markdown'
@@ -8,6 +8,19 @@ import { SUBAGENT_STATUS_LABELS, isSubagentRunning } from '../lib/subagents'
 import { usageMeter } from '../lib/context-usage'
 import { imageSrc, type DraftImage } from '../lib/images'
 import { useDraftImages } from '../hooks/useDraftImages'
+
+/**
+ * How much of a transcript is mounted on opening, and how much more each scroll to the top adds.
+ *
+ * A session with 140 heavy turns took ~450ms from switch to first pixel, because every message was
+ * parsed in a single commit and the pane stayed blank until the slowest one was done. Mounting the
+ * tail first puts the screen the reader asked for on glass in a fraction of that, and the earlier
+ * part fills in when they scroll back to it.
+ */
+const FIRST_WINDOW = 20
+const WINDOW_STEP = 20
+/** Distance from the top of the transcript (px) that asks for the previous window. */
+const GROW_DISTANCE = 320
 
 /** The desktop tool that starts a run: these get a card of their own instead of a generic row. */
 function isSubagentStart(name: string): boolean {
@@ -180,7 +193,7 @@ function Thinking({ text }: { text: string }) {
   )
 }
 
-function Message({
+const Message = memo(function Message({
   item,
   userIndex,
   onEditTurn,
@@ -236,7 +249,7 @@ function Message({
       </div>
     </article>
   )
-}
+})
 
 const SUGGESTIONS = [
   '梳理这个仓库的目录结构，并说明核心模块',
@@ -452,7 +465,10 @@ export function Conversation({
   subagents,
   onOpenSubagent,
   onSuggestion,
-  onEditTurn
+  onEditTurn,
+  sessionKey,
+  anchorId,
+  scrollRef
 }: {
   items: ChatItem[]
   workspace: string
@@ -463,7 +479,65 @@ export function Conversation({
   onSuggestion: (text: string) => void
   /** Rewrite history from the `index`-th user message and send it again. */
   onEditTurn: (index: number, text: string, images: DraftImage[]) => void
+  /** Identity of this conversation: the window resets per session, never per streamed event. */
+  sessionKey?: string
+  /** Message the reader was last on; the window opens around it instead of the tail. */
+  anchorId?: string
+  /** The transcript's scroll box, needed to notice a scroll back to the top. */
+  scrollRef?: React.RefObject<HTMLDivElement | null>
 }) {
+  const windowRef = useRef<{ key?: string; start: number }>({ start: 0 })
+  const heightRef = useRef(0)
+  const [, bump] = useState(0)
+  const anchorIndex = anchorId ? items.findIndex((item) => item.id === anchorId) : -1
+  // Decide once per session, when the transcript has actually arrived: for the first frames of a
+  // switch `items` is empty, and the tail is the part the reader is looking at.
+  if (items.length > 0 && windowRef.current.key !== sessionKey) {
+    windowRef.current = {
+      key: sessionKey,
+      start: anchorIndex >= 0
+        ? Math.max(0, anchorIndex - Math.floor(FIRST_WINDOW / 2))
+        : Math.max(0, items.length - FIRST_WINDOW)
+    }
+  }
+  const start = Math.min(
+    Math.max(0, windowRef.current.start),
+    Math.max(0, items.length - FIRST_WINDOW)
+  )
+
+  // Scrolling back asks for more of the transcript. The window grows instead of the list jumping:
+  // the effect below keeps the line under the viewport still while rows are inserted above it.
+  useEffect(() => {
+    const container = scrollRef?.current
+    if (!container) return
+    const onScroll = (): void => {
+      if (container.scrollTop > GROW_DISTANCE) return
+      if (windowRef.current.start <= 0) return
+      windowRef.current = {
+        ...windowRef.current,
+        start: Math.max(0, windowRef.current.start - WINDOW_STEP)
+      }
+      bump((value) => value + 1)
+    }
+    container.addEventListener('scroll', onScroll, { passive: true })
+    return () => container.removeEventListener('scroll', onScroll)
+  }, [scrollRef, sessionKey])
+
+  // Rows above the viewport grow the scroll height; without this the text slides down as they load.
+  // It also keeps a reader who is following the tail at the tail, because the bottom moved by the
+  // same amount the content grew.
+  useLayoutEffect(() => {
+    const container = scrollRef?.current
+    const previousHeight = heightRef.current
+    if (!container || !previousHeight) return
+    const delta = container.scrollHeight - previousHeight
+    if (delta > 0) container.scrollTop += delta
+  }, [start, scrollRef])
+  useLayoutEffect(() => {
+    const container = scrollRef?.current
+    if (container) heightRef.current = container.scrollHeight
+  })
+
   if (items.length === 0) {
     return (
       <div className="empty">
@@ -487,12 +561,17 @@ export function Conversation({
     )
   }
 
-  // The engine counts user turns, so each bubble has to know its own position among them. A pending
-  // bubble is not in the engine's history yet and gets -1 (no edit affordance).
-  let userTurns = -1
+  // The engine counts user turns, so each bubble has to know its own position among them. Rows
+  // hidden above the window still count — otherwise editing a message would rewrite the wrong turn.
+  let userTurns = items
+    .slice(0, start)
+    .filter((item) => item.role === 'user' && !item.pending).length - 1
   return (
-    <div className="conversation">
-      {items.map((item) => {
+    <div className="conversation" data-window-start={start}>
+      {start > 0 && (
+        <div className="conversation-earlier">向上滚动加载更早的消息（还有 {start} 条）</div>
+      )}
+      {items.slice(start).map((item) => {
         if (item.role === 'user' && !item.pending) userTurns += 1
         return (
           <Message

@@ -281,7 +281,10 @@ async function recordCurrentSession(
       ...(job && !protectedTitle ? { titleSource: job.source } : {}),
       additional: workspace.additional,
       ...(projectId ? { projectId } : {}),
-      updatedAt: Date.now()
+      // Only real work refreshes the activity timestamp. Recording the session the window just
+      // switched to is bookkeeping, not activity: bumping it made the row jump to the top of its
+      // directory every time the user looked at it.
+      updatedAt: duringSwitch && known ? known.updatedAt : Date.now()
     })
   const activeSession = toSummary(saved).path
   if (desktopConfig.activeSession !== activeSession) await saveConfig({ activeSession })

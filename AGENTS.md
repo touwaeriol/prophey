@@ -464,3 +464,10 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - 状态栏依据 status.isStreaming/compacting 而非仅依赖事件计数；activity 给出准备/等待模型/执行工具/重试状态，backgroundTasks 单独报告仍在运行的 Bash，前台结束时不得隐藏后台任务。
 - 输入框只保留简短占位提示，底部不再显示重复的快捷键说明栏；Enter 引导 / Ctrl+Enter 排队行为不变。`tests/queue-smoke.cjs` 验证无重复栏并测量节省空间。
 - **OpenAI 长窗口元数据修正**：`resources/extension/model-context.ts` 是主进程 SDK 与桌面 pi（含子代理）共用的修正入口，独立于 MCP 开关。仅把 `openai` 下 GPT-6 Astra/Luna/Sol、GPT-6.1 Sol 的旧 `272000` 内置窗口修正为官方 API 的 `1050000`；272K 计费分界和 128K 输出上限不变。修正在用户配置下层，显式 `models` / `modelOverrides` 仍优先；pi 在 `session_start` 确认没有用户扩展接管 OpenAI 后才注册，避免覆盖用户扩展的代理地址、认证或模型。不写用户配置、不修改 node_modules、不覆盖未来 SDK 的不同窗口值。不要据此推断 `openai-codex` 或原生 Codex 的账号窗口权限。`tests/model-context.test.cjs` 覆盖真实 SDK、Prophey 压缩与 pi RPC 的一致性（不发付费模型请求）。
+
+## 0.6.29 侧栏顺序、斜杠命令回车、长会话渲染
+
+- **会话顺序只由拖动决定**：`updatedAt` 以前在每次 `rememberSession` 都写 `Date.now()`，而激活会话也会调它，于是点一下就把这行顶到目录最前面、下面整片下滑。现在 `recordCurrentSession` 在切换记录时（`duringSwitch` 且已有记录）保留原 `updatedAt`，只有真正干活才刷新。顺序本身是一个用户拥有的值：`lib/session-order.ts` 的 `reconcileOrder` 把新出现的会话按当前排序键插到它该在的位置，其余行原地不动；拖动落点用 `moveSession`，存 `localStorage['pi-session-order']`。切换排序方式会清空手动顺序（那是明确要求重排）。回归 `tests/session-order.test.cjs`。
+- **斜杠命令按回车直接执行**（用户要求）：只有 `EngineCommand.args` 为空的命令（`/clear`、`/mcp`、`/status` 及原生无参命令）在回车/点击时立刻跑，输入框清空；带参数说明的（`/compact [提示词]`、`/autocompact`、`/btw`、`/model`、`/thinking`）仍然只填成「命令 + 空格」等参数。执行走 `App.runSlashCommand` → 同一个 `runCommand`，守卫在清草稿之前，失败转 toast。Tab 只补全。回归 `tests/slash-enter-smoke.cjs`。
+- **长会话只挂一窗**：以前 `items.map` 一次性渲染整段 transcript，140 条 × 约 6KB（用户最大会话就是这个体量）首次出现要 ~455ms 且中途空白。现在 `Conversation` 只挂尾部 20 条，滚到顶部附近每次补 20 条，并在 `useLayoutEffect` 里按 `scrollHeight` 增量补偿 `scrollTop`（插到视口上方的行不会让文字下跳）；带 `anchorId` 时窗口从「上次读到的那条」附近开始，配合 `session-scroll` 的锚点恢复。同时 `Message` 改 `memo`，`onEditTurn`/`subagents` 在 `App` 里稳定化，否则每次 status 广播都会把屏上每条消息重新解析一遍 markdown。裁剪掉的行仍参与用户回合计数，编辑不会改错消息。**不要**用 `content-visibility` 之类的纯 CSS 方案替代——React 仍然会解析全部 markdown，省不到首绘。回归 `tests/conversation-perf-smoke.cjs`（首绘 <300ms、初始只挂一窗、滚回后 140/140 全部挂载）。
+- 冒烟骨架（`tests/electron-smoke.cjs`）现在把渲染进程 `console-message` 转发到 stderr：渲染层崩溃以前只表现为「等输入框超时」，看不出原因。
