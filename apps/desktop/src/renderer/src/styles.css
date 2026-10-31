@@ -5515,6 +5515,16 @@ body.resizing-sidebar * {
 
 .image-context-menu button:hover { background: var(--bg-hover); }
 
+.image-context-menu button:disabled { opacity: 0.6; cursor: wait; }
+
+.image-context-menu-note {
+  max-width: 240px;
+  padding: 2px 9px 6px;
+  color: var(--danger-text);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .image-context-menu kbd {
   color: var(--faint);
   font-family: inherit;

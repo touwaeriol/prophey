@@ -3,6 +3,68 @@ import { CheckIcon, CloseIcon, CopyIcon } from './Icons'
 import { copyPreviewImage, imageSrc, type DraftImage } from '../lib/images'
 import type { MessageImage } from '../lib/messages'
 
+const COPY_HINT = navigator.platform.toLowerCase().includes('mac') ? '⌘C' : 'Ctrl+C'
+
+interface MenuEntry {
+  label: string
+  hint?: string
+  onSelect: () => void
+  disabled?: boolean
+}
+
+/**
+ * Chromium's built-in image menu is English-only and writes through a path we cannot check, so
+ * every image surface (lightbox and inline thumbnails) shares this one.
+ */
+export function ImageContextMenu({
+  x,
+  y,
+  entries,
+  note
+}: {
+  x: number
+  y: number
+  entries: MenuEntry[]
+  note?: string
+}): React.JSX.Element {
+  const height = 12 + entries.length * 30 + (note ? 26 : 0)
+  return (
+    <div
+      className="image-context-menu"
+      role="menu"
+      style={{
+        left: Math.max(8, Math.min(x, window.innerWidth - 188)),
+        top: Math.max(8, Math.min(y, window.innerHeight - height))
+      }}
+      onMouseDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {entries.map((entry) => (
+        <button key={entry.label} role="menuitem" onClick={entry.onSelect} disabled={entry.disabled}>
+          <span>{entry.label}</span>
+          {entry.hint && <kbd>{entry.hint}</kbd>}
+        </button>
+      ))}
+      {note && <div className="image-context-menu-note">{note}</div>}
+    </div>
+  )
+}
+
+/** Click outside / window resize / blur dismisses a floating menu. */
+function useDismissMenu(open: boolean, close: () => void): void {
+  useEffect(() => {
+    if (!open) return
+    window.addEventListener('mousedown', close)
+    window.addEventListener('resize', close)
+    window.addEventListener('blur', close)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('blur', close)
+    }
+  }, [open, close])
+}
+
 export function ImageLightbox({
   src,
   alt,
@@ -46,19 +108,8 @@ export function ImageLightbox({
     return () => window.clearTimeout(timer)
   }, [copyState])
 
-  useEffect(() => {
-    if (!menu) return
-    // Any click outside dismisses the menu. The menu stops propagation so its own clicks survive.
-    const dismiss = (): void => setMenu(undefined)
-    window.addEventListener('mousedown', dismiss)
-    window.addEventListener('resize', dismiss)
-    window.addEventListener('blur', dismiss)
-    return () => {
-      window.removeEventListener('mousedown', dismiss)
-      window.removeEventListener('resize', dismiss)
-      window.removeEventListener('blur', dismiss)
-    }
-  }, [menu])
+  // Any click outside dismisses the menu; the menu stops propagation so its own clicks survive.
+  useDismissMenu(menu !== undefined, useCallback(() => setMenu(undefined), []))
 
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
@@ -118,31 +169,21 @@ export function ImageLightbox({
       </div>
       <img ref={imageRef} src={src} alt={alt ?? '图片'} />
       {menu && (
-        <div
-          className="image-context-menu"
-          role="menu"
-          style={{
-            left: Math.max(8, Math.min(menu.x, window.innerWidth - 188)),
-            top: Math.max(8, Math.min(menu.y, window.innerHeight - 96))
-          }}
-          onMouseDown={(event) => event.stopPropagation()}
-          onContextMenu={(event) => event.preventDefault()}
-        >
-          <button
-            role="menuitem"
-            onClick={() => {
-              setMenu(undefined)
-              void copy()
-            }}
-          >
-            <span>复制图片</span>
-            <kbd>{navigator.platform.toLowerCase().includes('mac') ? '⌘C' : 'Ctrl+C'}</kbd>
-          </button>
-          <button role="menuitem" onClick={onClose}>
-            <span>关闭预览</span>
-            <kbd>Esc</kbd>
-          </button>
-        </div>
+        <ImageContextMenu
+          x={menu.x}
+          y={menu.y}
+          entries={[
+            {
+              label: '复制图片',
+              hint: COPY_HINT,
+              onSelect: () => {
+                setMenu(undefined)
+                void copy()
+              }
+            },
+            { label: '关闭预览', hint: 'Esc', onSelect: onClose }
+          ]}
+        />
       )}
     </div>
   )
@@ -156,6 +197,57 @@ export function MessageImages({
   align?: 'start' | 'end'
 }): React.JSX.Element | null {
   const [preview, setPreview] = useState<MessageImage>()
+  const [menu, setMenu] = useState<{ x: number; y: number; image: MessageImage; target: HTMLImageElement }>()
+  const [copyState, setCopyState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle')
+  const [error, setError] = useState('')
+  const copyingRef = useRef(false)
+  const closeMenu = useCallback(() => {
+    setMenu(undefined)
+    setCopyState('idle')
+    setError('')
+  }, [])
+
+  const copy = useCallback(async (target: HTMLImageElement): Promise<void> => {
+    if (copyingRef.current) return
+    copyingRef.current = true
+    setCopyState('copying')
+    setError('')
+    try {
+      await copyPreviewImage(target)
+      setCopyState('copied')
+    } catch (reason) {
+      setCopyState('error')
+      setError(reason instanceof Error ? reason.message : '复制图片失败，请重试')
+    } finally {
+      copyingRef.current = false
+    }
+  }, [])
+
+  useDismissMenu(menu !== undefined, closeMenu)
+
+  useEffect(() => {
+    if (copyState !== 'copied') return
+    const timer = window.setTimeout(closeMenu, 2000)
+    return () => window.clearTimeout(timer)
+  }, [copyState, closeMenu])
+
+  useEffect(() => {
+    if (!menu) return
+    const handler = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        closeMenu()
+      } else if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        event.stopPropagation()
+        void copy(menu.target)
+      }
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [menu, copy, closeMenu])
+
   if (images.length === 0) return null
   return (
     <>
@@ -165,7 +257,16 @@ export function MessageImages({
             key={`${index}-${image.data.slice(0, 12)}`}
             className="message-image"
             onClick={() => setPreview(image)}
-            title="查看大图"
+            onContextMenu={(event) => {
+              // Right-click copies the full-resolution image without opening the preview first.
+              event.preventDefault()
+              event.stopPropagation()
+              const target = event.currentTarget.querySelector('img')
+              setCopyState('idle')
+              setError('')
+              if (target) setMenu({ x: event.clientX, y: event.clientY, image, target })
+            }}
+            title="查看大图 · 右键可复制图片"
           >
             <img src={imageSrc(image)} alt={`图片${index + 1}`} />
           </button>
@@ -173,6 +274,29 @@ export function MessageImages({
       </div>
       {preview && (
         <ImageLightbox src={imageSrc(preview)} onClose={() => setPreview(undefined)} />
+      )}
+      {menu && (
+        <ImageContextMenu
+          x={menu.x}
+          y={menu.y}
+          note={error}
+          entries={[
+            {
+              label: copyState === 'copied' ? '已复制' : copyState === 'copying' ? '复制中…' : '复制图片',
+              hint: COPY_HINT,
+              disabled: copyState === 'copying',
+              onSelect: () => void copy(menu.target)
+            },
+            {
+              label: '查看大图',
+              onSelect: () => {
+                const image = menu.image
+                closeMenu()
+                setPreview(image)
+              }
+            }
+          ]}
+        />
       )}
     </>
   )

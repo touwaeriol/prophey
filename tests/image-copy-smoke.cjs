@@ -156,6 +156,38 @@ module.exports = async function imageCopySmoke(evaluate, until, window, setSessi
     await copied()
     await assertClipboard('session JPEG converted to PNG', jpegPixels)
     await closePreview()
+    // Right-click on the inline thumbnail copies it without opening the preview first.
+    clipboard.clear()
+    await evaluate(`(() => {
+      const thumb = document.querySelector('.message-image')
+      const rect = thumb.getBoundingClientRect()
+      thumb.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true,
+        clientX: Math.round(rect.left + rect.width / 2),
+        clientY: Math.round(rect.top + rect.height / 2)
+      }))
+    })()`)
+    await until(() => evaluate('!!document.querySelector(".image-context-menu")'), 'thumbnail context menu')
+    assert.equal(await evaluate('!!document.querySelector(".image-lightbox")'), false, 'thumbnail menu needs no preview')
+    assert.deepEqual(
+      await evaluate('[...document.querySelectorAll(".image-context-menu button span")].map(node => node.textContent)'),
+      ['复制图片', '查看大图']
+    )
+    const menuBox = await evaluate(`(() => {
+      const rect = document.querySelector('.image-context-menu').getBoundingClientRect()
+      return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, w: innerWidth, h: innerHeight }
+    })()`)
+    assert.ok(menuBox.top >= 0 && menuBox.left >= 0 && menuBox.bottom <= menuBox.h && menuBox.right <= menuBox.w,
+      'thumbnail menu stays inside the window')
+    await evaluate('document.querySelector(".image-context-menu button").click()')
+    await until(() => evaluate('document.querySelector(".image-context-menu button span")?.textContent === "已复制"'), 'thumbnail copy feedback')
+    await assertClipboard('thumbnail context menu', jpegPixels)
+    await evaluate(`document.querySelector('.message-image').dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30 }))`)
+    await until(() => evaluate('!!document.querySelector(".image-context-menu")'), 'thumbnail menu again')
+    await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+    await until(() => evaluate('!document.querySelector(".image-context-menu")'), 'escape closes the thumbnail menu')
+    assert.equal(await evaluate('!!document.querySelector(".image-lightbox")'), false, 'escape does not open a preview')
     await openPreview('.message-image')
     await evaluate(`document.querySelector('.image-lightbox img').src = 'data:image/png;base64,bm90IGEgcG5n'`)
     await until(() => evaluate(`(() => { const img = document.querySelector('.image-lightbox img'); return img.complete && img.naturalWidth === 0 })()`), 'broken img src')
@@ -174,7 +206,7 @@ module.exports = async function imageCopySmoke(evaluate, until, window, setSessi
       assert.ok(result.error)
       await assertClipboard('invalid IPC preserves clipboard')
     }
-    console.log('Image copy passed: draft paste, button, context menu, shortcut, native copy, session JPEG, broken source, invalid IPC')
+    console.log('Image copy passed: draft paste, button, context menu, shortcut, native copy, session JPEG, thumbnail right-click, broken source, invalid IPC')
   } finally {
     try {
       await closePreview()
