@@ -12,6 +12,8 @@ import { pathKey } from './session-groups'
 export interface SessionMessagesPayload {
   sessionKey?: string
   messages: unknown[]
+  /** The engine is not ready to answer yet; an empty `messages` here means "ask again", not "empty". */
+  pending?: boolean
 }
 
 export function messagesBelong(

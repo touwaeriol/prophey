@@ -468,7 +468,8 @@ export function Conversation({
   onEditTurn,
   sessionKey,
   anchorId,
-  scrollRef
+  scrollRef,
+  loading
 }: {
   items: ChatItem[]
   workspace: string
@@ -485,6 +486,8 @@ export function Conversation({
   anchorId?: string
   /** The transcript's scroll box, needed to notice a scroll back to the top. */
   scrollRef?: React.RefObject<HTMLDivElement | null>
+  /** History is on its way: say so instead of claiming the conversation is empty. */
+  loading?: boolean
 }) {
   const windowRef = useRef<{ key?: string; start: number }>({ start: 0 })
   const heightRef = useRef(0)
@@ -539,6 +542,16 @@ export function Conversation({
   })
 
   if (items.length === 0) {
+    // A conversation being loaded is not an empty one. Without this the window offered 「开始一段
+    // 对话」 over a session whose engine was still starting, which reads as "my history is gone".
+    if (loading) {
+      return (
+        <div className="empty">
+          <div className="empty-mark">π</div>
+          <p className="empty-sub">正在载入会话…</p>
+        </div>
+      )
+    }
     return (
       <div className="empty">
         <div className="empty-mark">π</div>

@@ -641,6 +641,11 @@ export default function App(): React.JSX.Element {
     [activeProjectId, askConfirm, projects, loadProjects]
   )
   const messagesRequest = useRef(0)
+  /**
+   * The transcript on its way in. A session that has history must not show 「开始一段对话」 while it
+   * loads: that sentence claims the conversation is empty, which is the opposite of the truth.
+   */
+  const [messagesLoading, setMessagesLoading] = useState(false)
   const loadMessages = useCallback(async (attempt = 0) => {
     const request = ++messagesRequest.current
     const owner = statusRef.current
@@ -649,17 +654,43 @@ export default function App(): React.JSX.Element {
       statusRef.current.engine === owner.engine && messagesBelong(owner.sessionKey ?? owner.sessionFile, statusRef.current)
     try {
       const payload = await window.pi.getMessages()
+      /** Look again in a moment: the engine is starting or a switch is still in flight. */
+      const later = (): void => {
+        // ~9s of patience: an engine boot plus a big transcript load is well under that, and after it
+        // the user has a visible state instead of a loop burning IPC forever.
+        if (attempt < 60 && request === messagesRequest.current) {
+          window.setTimeout(() => void loadMessages(attempt + 1), 150)
+          return
+        }
+        // Out of tries: stop claiming the transcript is on its way.
+        if (request === messagesRequest.current) setMessagesLoading(false)
+      }
       // The engine names the session it answered from. While a switch is in flight it can still
       // hold the previous transcript; painting that under the new title is the "conversation from
       // another directory" bug. Wait for it instead of showing the wrong conversation.
       if (!messagesBelong(payload.sessionKey, owner)) {
-        if (attempt < 20 && request === messagesRequest.current) {
-          window.setTimeout(() => void loadMessages(attempt + 1), 150)
-        }
+        setMessagesLoading(true)
+        later()
         return
       }
-      if (!isCurrent()) return
+      // An empty answer from an engine that is not ready yet is not an empty conversation. Taking it
+      // as one painted 「开始一段对话」 over a session that was still starting — and since nothing
+      // loaded it again, the pane stayed blank while that session's run was visibly going.
+      if (
+        payload.messages.length === 0 &&
+        (payload.pending || statusRef.current.switchingEngine || statusRef.current.phase !== 'ready')
+      ) {
+        setMessagesLoading(true)
+        later()
+        return
+      }
+      if (!isCurrent()) {
+        // A switch landed after the answer arrived: that answer belongs to the session being left.
+        if (statusRef.current.switchingEngine) later()
+        return
+      }
       setItems(toChatItems(payload.messages))
+      setMessagesLoading(false)
       setStick(true)
       const stats = await window.pi.getSessionStats().catch(() => undefined)
       if (!isCurrent() || !messagesBelong(stats?.sessionKey, owner)) return
@@ -1713,6 +1744,7 @@ export default function App(): React.JSX.Element {
               >
                 <Conversation
                   items={items}
+                  loading={messagesLoading}
                   sessionKey={activeComposerKey}
                   anchorId={scrollAnchorId}
                   scrollRef={scrollRef}

@@ -181,6 +181,11 @@ export interface SessionMessages {
   /** Session the engine answered from; the window drops answers that belong to another session. */
   sessionKey?: string;
   messages: AgentMessage[];
+  /**
+   * The engine is not ready to answer yet. An empty `messages` then means "ask again", not "this
+   * conversation is empty" — treating the two the same painted an empty chat over a real session.
+   */
+  pending?: boolean;
 }
 
 export interface PromptImage {

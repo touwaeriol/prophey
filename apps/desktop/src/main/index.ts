@@ -2462,7 +2462,10 @@ function registerIpc(): void {
     // the previous transcript, and the window must not paint that under the new session.
     const engineState = currentEngine.state()
     const sessionKey = engineState.sessionKey ?? engineState.sessionFile
-    if (!currentEngine.running()) return { sessionKey, messages: [] }
+    // "Not ready" is not "empty". Saying `messages: []` here made the window paint 「开始一段对话」
+    // over a session that was merely still starting, and nothing loaded it again: the pane stayed
+    // blank while the run it belonged to was visibly going. `pending` tells the window to look again.
+    if (!currentEngine.running()) return { sessionKey, messages: [], pending: true }
     return { sessionKey, messages: (await currentEngine.messages()) as AgentMessage[] }
   })
 

@@ -170,7 +170,10 @@ export class PropheyEngine implements AgentEngine {
     this.roots = { primary: wanted.primary, additional: [...wanted.additional] }
     this.conventions = readProjectConventions(wanted.primary).text
     this.tools = undefined
-    this.snapshot = { phase: 'ready', cwd: wanted.primary, isStreaming: false, compacting: false,
+    // `starting`, not `ready`: the transcript is restored further down, and a session that reports
+    // ready while it still holds nothing answers get_messages with an empty list — which the window
+    // painted as 「开始一段对话」 over a conversation with hundreds of turns in it.
+    this.snapshot = { phase: 'starting', cwd: wanted.primary, isStreaming: false, compacting: false,
       thinkingLevel: this.snapshot.thinkingLevel }
     this.options.onStatus(this.snapshot)
     // Pick a model up front: the window reads it from the status, and an unset model shows as
@@ -188,7 +191,7 @@ export class PropheyEngine implements AgentEngine {
     if (options.session && !currentEmptySession) await this.switchSession(options.session)
     else await this.resume()
     if (options.model) await this.setModel(options.model.provider, options.model.id).catch(() => undefined)
-    this.setStatus({ sessionFile: this.transcriptPath() })
+    this.setStatus({ phase: 'ready', sessionFile: this.transcriptPath() })
     this.publishUsage(true)
     return this.snapshot
   }

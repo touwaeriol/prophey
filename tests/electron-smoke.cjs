@@ -125,6 +125,7 @@ app.on('browser-window-created', (_event, window) => {
       await require('./image-copy-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./video-smoke.cjs')(evaluate, until, window)
       await require('./session-messages-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
+      await require('./session-loading-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./compaction-summary-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./conversation-perf-smoke.cjs')(evaluate, until, window, fixture => { imageCopySessionFixture = fixture })
       await require('./compaction-clock-smoke.cjs')(evaluate, until, window)

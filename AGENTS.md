@@ -471,3 +471,9 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 - **斜杠命令按回车直接执行**（用户要求）：只有 `EngineCommand.args` 为空的命令（`/clear`、`/mcp`、`/status` 及原生无参命令）在回车/点击时立刻跑，输入框清空；带参数说明的（`/compact [提示词]`、`/autocompact`、`/btw`、`/model`、`/thinking`）仍然只填成「命令 + 空格」等参数。执行走 `App.runSlashCommand` → 同一个 `runCommand`，守卫在清草稿之前，失败转 toast。Tab 只补全。回归 `tests/slash-enter-smoke.cjs`。
 - **长会话只挂一窗**：以前 `items.map` 一次性渲染整段 transcript，140 条 × 约 6KB（用户最大会话就是这个体量）首次出现要 ~455ms 且中途空白。现在 `Conversation` 只挂尾部 20 条，滚到顶部附近每次补 20 条，并在 `useLayoutEffect` 里按 `scrollHeight` 增量补偿 `scrollTop`（插到视口上方的行不会让文字下跳）；带 `anchorId` 时窗口从「上次读到的那条」附近开始，配合 `session-scroll` 的锚点恢复。同时 `Message` 改 `memo`，`onEditTurn`/`subagents` 在 `App` 里稳定化，否则每次 status 广播都会把屏上每条消息重新解析一遍 markdown。裁剪掉的行仍参与用户回合计数，编辑不会改错消息。**不要**用 `content-visibility` 之类的纯 CSS 方案替代——React 仍然会解析全部 markdown，省不到首绘。回归 `tests/conversation-perf-smoke.cjs`（首绘 <300ms、初始只挂一窗、滚回后 140/140 全部挂载）。
 - 冒烟骨架（`tests/electron-smoke.cjs`）现在把渲染进程 `console-message` 转发到 stderr：渲染层崩溃以前只表现为「等输入框超时」，看不出原因。
+
+## 0.6.30 会话不能“看起来被清空”
+
+- **`ready` 不等于 transcript 已就位**：`prophey-engine.start()` 以前先把 `phase` 设成 `ready`，再 `await switchSession()` 读 transcript。700KB 级的会话在解析期间，`pi:get-messages` 看到 ready 就返回 `messages: []`，窗口看到 `sessionKey` 匹配就把空数组当真，画成「开始一段对话」——数据一直在盘上、引擎还在跑任务，界面却说会话是空的，而且之后没有任何东西再触发一次加载。现在 `start()` 载入期间报 `phase: 'starting'`，载完才 `ready`。
+- **“未就绪”和“空”必须区分**：`pi:get-messages` 在 `!running()` 时返回 `pending: true`（`SessionMessages.pending`），不再返回一条假装是真相的空数组。窗口对 `pending` / `switchingEngine` / `phase !== 'ready'` 一律“稍后再问”（150ms × 最多 60 次 ≈ 9s），并且在 `switchingEngine` 为真时不再**丢弃答案而不重试**——切换标志清掉后 status 依赖项没变，effect 不会重跑，那正是会话永久空白的一条路径。
+- **加载中说加载**：新增 `messagesLoading`，`Conversation` 在 `items.length === 0 && loading` 时渲染「正在载入会话…」，不能对正在载入的会话说「开始一段对话」（那句话等于宣布历史没了）。回归 `tests/session-loading-smoke.cjs`：先给 `pending` 空回答，断言不出现「开始一段对话」、出现「正在载入会话…」，等待后仍不冒充空，再给真实消息断言填上。
