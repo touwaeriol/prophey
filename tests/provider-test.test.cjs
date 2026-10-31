@@ -74,6 +74,17 @@ after(() => {
   fs.rmSync(temp, { recursive: true, force: true })
 })
 
+/** A minimal OpenAI-compatible streaming reply: one chunk with text, then the stop. */
+const SSE_OK = [
+  'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"OK"}}]}',
+  '',
+  'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+  '',
+  'data: [DONE]',
+  '',
+  ''
+].join('\n')
+
 /** Point one custom provider at the fake gateway, the way the editor writes models.json. */
 function configure(basePath, modelId) {
   fs.writeFileSync(
@@ -93,46 +104,48 @@ function configure(basePath, modelId) {
   providers.invalidateCache()
 }
 
-test('a Base URL without a path gets its /v1 before the request leaves', async () => {
-  // Hand the runtime the bare spelling, the way an older version wrote it.
+test('a Base URL without a path keeps its spelling and still works', async () => {
+  // The address is stored exactly as the user typed it — that is the whole point.
   configure('', 'deepseek-flash')
   requests.length = 0
   handler = (request) => (request.url === '/v1/chat/completions'
-    ? {
-        status: 200,
-        type: 'text/event-stream',
-        body: 'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"OK"}}]}\n\n' +
-          'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n' +
-          'data: [DONE]\n\n'
-      }
+    ? { status: 200, type: 'text/event-stream', body: SSE_OK }
+    // The host root is a web page, which is what a gateway without a version segment answers.
     : { status: 200, type: 'text/html', body: '<!doctype html><html><body>gateway</body></html>' })
   const result = await providers.testProvider('local')
   assert.equal(result.ok, true, result.detail)
-  // Nothing was ever asked for `/chat/completions` at the host root: the missing segment was filled in.
-  assert(requests.every((entry) => entry.url !== '/chat/completions'), JSON.stringify(requests.map(r => r.url)))
-  assert(requests.some((entry) => entry.url === '/v1/chat/completions'), JSON.stringify(requests.map(r => r.url)))
-  assert.equal(result.detail, '已自动补全 /v1：http://127.0.0.1:' + port + '/v1', 'the row says what it changed')
-  // The fix is on disk, so pi and every later start read the same URL.
+  // Two requests: the address as typed, then the same one under /v1. Nothing was rewritten.
+  assert.deepEqual(requests.map((entry) => entry.url), ['/chat/completions', '/v1/chat/completions'])
+  assert.match(result.detail ?? '', /地址保持原样/)
+  assert.match(result.detail ?? '', /\/v1/)
   const written = JSON.parse(fs.readFileSync(path.join(agentDir, 'models.json'), 'utf8'))
-  assert.equal(written.providers.local.baseUrl, 'http://127.0.0.1:' + port + '/v1')
+  assert.equal(written.providers.local.baseUrl, 'http://127.0.0.1:' + port, 'the file keeps what was typed')
 })
 
-test('a bare Base URL written while the app runs is repaired at read time and at test time', async () => {
-  // Warm the runtime against the corrected address, then simulate a hand edit that puts the bare one
-  // back: the cached runtime is stale now, exactly like a models.json edited outside the editor.
-  configure('/v1', 'deepseek-flash')
-  await providers.listProviders()
-  const bare = JSON.parse(fs.readFileSync(path.join(agentDir, 'models.json'), 'utf8'))
-  bare.providers.local.baseUrl = 'http://127.0.0.1:' + port
-  fs.writeFileSync(path.join(agentDir, 'models.json'), JSON.stringify(bare))
+test('a gateway that really serves the bare path is not retried', async () => {
+  configure('', 'deepseek-flash')
   requests.length = 0
-  handler = () => ({ status: 200, type: 'text/html', body: '<!doctype html><html><body>gateway</body></html>' })
-  const fixed = await providers.normalizeModelsJsonFile()
-  assert.deepEqual(fixed, { local: 'http://127.0.0.1:' + port + '/v1' })
-  const written = JSON.parse(fs.readFileSync(path.join(agentDir, 'models.json'), 'utf8'))
-  assert.equal(written.providers.local.baseUrl, 'http://127.0.0.1:' + port + '/v1')
-  // Idempotent: a file that already carries the version segment is not rewritten.
-  assert.deepEqual(await providers.normalizeModelsJsonFile(), {})
+  // Some gateways do answer /chat/completions at the root. That answer stands: no fallback, no note.
+  handler = (request) => (request.url === '/chat/completions'
+    ? { status: 200, type: 'text/event-stream', body: SSE_OK }
+    : { status: 200, type: 'text/html', body: '<!doctype html><html><body>gateway</body></html>' })
+  const result = await providers.testProvider('local')
+  assert.equal(result.ok, true, result.detail)
+  assert.deepEqual(requests.map((entry) => entry.url), ['/chat/completions'])
+  assert.equal(result.detail, undefined, 'nothing to explain')
+})
+
+test('an answer the gateway really gave is never replaced by a retry', async () => {
+  configure('', 'deepseek-flash')
+  requests.length = 0
+  // 401 is a real API answer: retrying under /v1 would hide the key problem behind a second failure.
+  handler = () => ({ status: 401, body: JSON.stringify({ error: { message: 'Incorrect API key provided' } }) })
+  const result = await providers.testProvider('local')
+  assert.equal(result.ok, false)
+  assert.match(result.detail ?? '', /401\/403/)
+  // The 401 stands: no `/v1/chat/completions` was ever tried (the models probe may run, that is
+  // the separate "which ids does this channel sell" question).
+  assert.equal(requests.some((entry) => entry.url.includes('/v1/chat')), false)
 })
 
 test('a model the channel does not sell names the ids it does sell', async () => {
@@ -169,26 +182,23 @@ test('a refused key, a 404 and a DNS failure each say what to fix', async () => 
   assert.equal(providers.describeProviderFailure('some brand new failure'), 'some brand new failure')
 })
 
-test('both spellings of an OpenAI Base URL mean the same thing', async () => {
-  const file = {
-    providers: {
-      bare: { api: 'openai-completions', baseUrl: 'https://host.example' },
-      pathed: { api: 'openai-completions', baseUrl: 'https://host.example/openai' },
-      versioned: { api: 'openai-completions', baseUrl: 'https://host.example/v1/' },
-      // The anthropic adapter adds `/v1/messages` itself, so a bare host is correct there.
-      claude: { api: 'anthropic-messages', baseUrl: 'https://host.example' }
-    }
-  }
-  providers.normalizeBaseUrls(file)
-  assert.equal(file.providers.bare.baseUrl, 'https://host.example/v1')
-  assert.equal(file.providers.pathed.baseUrl, 'https://host.example/openai')
-  assert.equal(file.providers.versioned.baseUrl, 'https://host.example/v1/')
-  assert.equal(file.providers.claude.baseUrl, 'https://host.example')
-  assert.equal(url.withVersionPath('not a url'), 'not a url')
-  // Saving is the choke point: the file on disk is what pi reads.
-  await providers.saveModelsJson(
-    JSON.stringify({ providers: { bare: { api: 'openai-responses', baseUrl: 'https://host.example' } } })
-  )
+test('both spellings are accepted and stored as typed', async () => {
+  // Saving must not "helpfully" rewrite the address: the user typed it, the request layer copes.
+  await providers.saveModelsJson(JSON.stringify({ providers: {
+    bare: { api: 'openai-completions', baseUrl: 'https://host.example' },
+    pathed: { api: 'openai-completions', baseUrl: 'https://host.example/openai' },
+    versioned: { api: 'openai-completions', baseUrl: 'https://host.example/v1/' }
+  } }))
   const written = JSON.parse(fs.readFileSync(path.join(agentDir, 'models.json'), 'utf8'))
-  assert.equal(written.providers.bare.baseUrl, 'https://host.example/v1')
+  assert.equal(written.providers.bare.baseUrl, 'https://host.example')
+  assert.equal(written.providers.pathed.baseUrl, 'https://host.example/openai')
+  assert.equal(written.providers.versioned.baseUrl, 'https://host.example/v1/')
+  // A bare OpenAI-compatible host is not an address problem any more; a pathed one still is not.
+  assert.equal(providers.bareOpenAiBase('bare'), 'https://host.example')
+  assert.equal(providers.bareOpenAiBase('pathed'), undefined)
+  assert.equal(providers.bareOpenAiBase('versioned'), undefined)
+  // The editor's hint is driven by the same question.
+  assert.equal(url.needsVersionPath('https://host.example', 'openai-completions'), true)
+  assert.equal(url.needsVersionPath('https://host.example/v1', 'openai-completions'), false)
+  assert.equal(url.needsVersionPath('https://host.example', 'anthropic-messages'), false)
 })

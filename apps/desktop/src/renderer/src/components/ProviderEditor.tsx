@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ProviderInfo } from '@shared/types'
 import { declaresImageInput } from '@shared/model-input'
-import { needsVersionPath as bareOpenAiUrl, withVersionPath } from '@shared/provider-url'
+import { needsVersionPath as bareOpenAiUrl } from '@shared/provider-url'
 import { buildProviderModels, emptyModel, type ModelDraft } from '../lib/provider-models'
 import { CheckIcon, CloseIcon, ExternalIcon, PlusIcon, TrashIcon } from './Icons'
 
@@ -348,9 +348,9 @@ export function ProviderEditor({
                 onChange={(event) => updateDraft({ baseUrl: event.target.value })}
               />
               {needsVersionPath && (
-                <p className="field-hint warn">
-                  OpenAI 兼容接口会请求 <code>Base URL + /chat/completions</code>：保存时会自动补成{' '}
-                  <code>{withVersionPath(draft.baseUrl)}</code>（带路径的地址不会被动）。
+                <p className="field-hint">
+                  地址按你写的保存，不会补 /v1。网关若只在 <code>/v1</code> 下提供接口，请求会自动改走{' '}
+                  <code>/v1</code> 重试一次，配置里仍是原样。
                 </p>
               )}
             </div>

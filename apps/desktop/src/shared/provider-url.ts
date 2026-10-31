@@ -1,32 +1,24 @@
 /**
  * Base URLs for OpenAI-compatible providers.
  *
- * The adapter appends `/chat/completions` to whatever Base URL it is given, so `https://host` asks a
- * gateway's web page for a completion — the request "works" (200, HTML) and the reply is empty. Both
- * spellings are common in the wild (`https://api.deepseek.com` and `https://api.deepseek.com/v1` are
- * the same API), so the missing version segment is filled in rather than reported as a broken
- * protocol. A URL that already carries a path is left exactly as typed.
+ * Both spellings are common in the wild and mean the same API, so the app accepts either one **without
+ * rewriting what the user typed**: the request goes to the address as configured, and a gateway that
+ * serves its API under `/v1` answers the bare form with its web page — that answer is detected and the
+ * request retried once under `/v1` (`main/provider-fetch.ts`). Nothing here transforms an address;
+ * this module only answers "does it carry a path?", which decides whether that fallback applies.
  */
-export function withVersionPath(baseUrl: string): string {
+export function hasUrlPath(baseUrl: string): boolean {
   try {
-    const url = new URL(baseUrl.trim())
-    const path = url.pathname.replace(/\/+$/, '')
-    if (path !== '') return baseUrl.trim()
-    return `${url.origin}/v1`
+    return new URL(baseUrl.trim()).pathname.replace(/\/+$/, '') !== ''
   } catch {
-    // Not a URL we can parse: leave it to the editor's validation rather than guessing.
-    return baseUrl
+    return false
   }
 }
 
-/** True when an `openai-*` Base URL carries no path segment, so it must be filled in on save. */
+/** True when an `openai-*` Base URL carries no path segment, so the `/v1` fallback applies to it. */
 export function needsVersionPath(baseUrl: string, api: string): boolean {
   if (!/^openai-(completions|responses)$/i.test(api.trim())) return false
   const url = baseUrl.trim()
   if (!url) return false
-  try {
-    return new URL(url).pathname.replace(/\/+$/, '') === ''
-  } catch {
-    return false
-  }
+  return !hasUrlPath(url)
 }

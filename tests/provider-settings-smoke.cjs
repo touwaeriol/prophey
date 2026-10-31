@@ -79,20 +79,19 @@ module.exports = async function checkProviderSettings(evaluate, until) {
   await save()
   await openRow('smoke-provider')
   assert.equal(await evaluate('document.querySelector(".provider-editor input[type=password]").type'), 'password')
-  // An OpenAI adapter appends /chat/completions, so a bare host is pointed at a web page: saving fills
-  // the version segment in instead of letting the first conversation fail.
+  // An OpenAI adapter appends /chat/completions, so a bare host may land on a gateway's web page. The
+  // address is stored as typed and the request is retried under /v1, so the hint must say that — a
+  // promise to rewrite the address would be a lie.
   await input('input[placeholder="https://api.example.com/v1"]', 'https://example.invalid')
-  await until(() => evaluate('!!document.querySelector(".field-hint.warn")'), 'bare host warning')
-  assert.match(
-    await evaluate('document.querySelector(".field-hint.warn").textContent'),
-    /自动补成/,
-    'the warning says what saving will do'
-  )
-  assert.match(
-    await evaluate('document.querySelector(".field-hint.warn code:last-of-type").textContent'),
-    /^https:\/\/example\.invalid\/v1$/,
-    'and shows the address it becomes'
-  )
+  const hintRead = `(() => {
+    const field = document.querySelector('input[placeholder="https://api.example.com/v1"]')?.closest('.field')
+    return field?.querySelector('.field-hint')?.textContent ?? ''
+  })()`
+  await until(() => evaluate(hintRead).then((text) => Boolean(text)), 'bare host hint')
+  const hint = await evaluate(hintRead)
+  assert.match(hint, /按你写的保存/, 'the hint promises the address is kept')
+  assert.match(hint, /自动改走/, 'and explains the retry')
+  assert.equal(/自动补成/.test(hint), false, 'nothing is rewritten any more')
   await input('input[placeholder="https://api.example.com/v1"]', 'https://example.invalid/edited')
   await save()
   const edited = (await saved()).providers['smoke-provider']

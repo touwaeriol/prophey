@@ -1,6 +1,6 @@
 import { updateJsonFile, writeJsonAtomic } from './storage'
 import { createContextProvider } from '../../resources/extension/model-context'
-import { promises as fs } from 'node:fs'
+import { promises as fs, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { shell } from 'electron'
@@ -26,7 +26,7 @@ import {
   settingsPath
 } from './profile'
 import { declaresImageInput } from '../shared/model-input'
-import { withVersionPath } from '../shared/provider-url'
+import { createCompatFetch, noteFallback, takeFallback } from './provider-fetch'
 import { guardedStream } from './agent/stream-guard'
 import type { ProviderTestResult } from '../shared/types'
 
@@ -68,16 +68,27 @@ async function getBuiltinProviderIds(): Promise<Set<string>> {
 export function getRuntime(): Promise<ModelRuntime> {
   if (!runtimePromise) {
     const pending = (async () => {
-      // `https://host` and `https://host/v1` are the same API, and a file written by an older version
-      // (or by hand) may still hold the bare one. Fill it in before the runtime reads the file, so
-      // nothing downstream ever sends `/chat/completions` to a gateway's web page.
-      await normalizeModelsJsonFile().catch(() => undefined)
       const sdk = await import('@earendil-works/pi-coding-agent')
       const runtime = await sdk.ModelRuntime.create({
         authPath: authPath(),
         modelsPath: modelsPath(),
         refreshOnCreate: false
       })
+      // A Base URL without `/v1` is the user's choice to keep: requests are made as typed and retried
+      // once with the version segment when the gateway answers with a web page. One wrapper covers
+      // every model request the app makes (chat, compaction, titles, suggestions).
+      for (const method of ['streamSimple', 'stream'] as const) {
+        const original = runtime[method].bind(runtime) as (...args: unknown[]) => unknown
+        ;(runtime as unknown as Record<string, unknown>)[method] = (
+          model: { provider?: string },
+          context: unknown,
+          options: Record<string, unknown> = {}
+        ) =>
+          original(model, context, {
+            ...options,
+            fetch: options.fetch ?? runtimeFetch(model?.provider)
+          })
+      }
       // Correct the builtin catalog below user overrides, so every consumer (UI,
       // execution, compaction, titles and subagents) sees the same window.
       runtime.registerNativeProvider(await createContextProvider(authPath()))
@@ -95,6 +106,8 @@ function resetRuntime(): void {
   runtimePromise = null
   matchersCache = null
   choicesCache = null
+  // The address the compat layer reads is cached for a second; a save must be visible immediately.
+  modelsCache = { at: 0, providers: {} }
 }
 
 /** Drop cached provider/model data after credentials or settings change. */
@@ -283,80 +296,62 @@ export async function saveModelsJson(content: string): Promise<void> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('models.json 顶层必须是 JSON 对象')
   }
-  normalizeBaseUrls(parsed as Record<string, unknown>)
+  // The address is stored exactly as typed: `https://host` and `https://host/v1` both work at
+  // request time (see `provider-fetch.ts`), so rewriting it would only lose what the user meant.
   await writeJsonAtomic(modelsPath(), parsed)
   resetRuntime()
 }
 
 /**
- * Accept both `https://host` and `https://host/v1` for OpenAI-compatible endpoints.
+ * The `fetch` a provider's requests go through: unchanged, except that a bare OpenAI-compatible host
+ * gets its answer retried once under `/v1` when the gateway serves a web page there instead.
  *
- * The adapter appends `/chat/completions` to the Base URL it is given, so a bare host asks the
- * gateway's web page for a completion — the request “works” (200, HTML) and the answer is empty. Most
- * gateways serve the same API under both spellings, so the missing version segment is filled in at
- * save time instead of being reported as a broken protocol later. A URL that already carries a path
- * (`/v1`, `/openai`, …) is left exactly as typed.
+ * `models.json` is never modified — the address on screen is the address that is used.
  */
-export function normalizeBaseUrls(file: Record<string, unknown>): void {
-  normalizeProviders(providersOf(file))
+export function runtimeFetch(providerId: string | undefined): typeof globalThis.fetch {
+  const bare = providerId ? bareOpenAiBase(providerId) : undefined
+  if (!bare) return globalThis.fetch
+  return createCompatFetch(
+    { bareBase: bare },
+    { onFallback: (from, to) => noteFallback(providerId!, from, to) }
+  )
 }
 
-/** One provider's repair: the bare spelling it had, and the versioned one it becomes. */
-interface BaseUrlRepair {
-  from: string
-  to: string
-}
-
-/** Per-provider repair, shared by saving and by the read-time sweep below. */
-function normalizeProviders(providers: ModelsJsonProviders): Record<string, BaseUrlRepair> {
-  const fixed: Record<string, BaseUrlRepair> = {}
-  for (const [id, config] of Object.entries(providers)) {
-    if (!config || typeof config !== 'object') continue
-    const api = typeof config.api === 'string' ? config.api : ''
-    const baseUrl = typeof config.baseUrl === 'string' ? config.baseUrl.trim() : ''
-    if (!baseUrl || !/^openai-(completions|responses)$/i.test(api)) continue
-    const next = withVersionPath(baseUrl)
-    if (next === baseUrl) continue
-    config.baseUrl = next
-    fixed[id] = { from: baseUrl, to: next }
+/** The configured Base URL of an OpenAI-compatible provider, when it carries no path segment. */
+export function bareOpenAiBase(providerId: string): string | undefined {
+  const config = (runtimeModelsConfig()[providerId] ?? {}) as { api?: string; baseUrl?: string }
+  const api = typeof config.api === 'string' ? config.api : ''
+  const baseUrl = typeof config.baseUrl === 'string' ? config.baseUrl.trim() : ''
+  if (!baseUrl || !/^openai-(completions|responses)$/i.test(api)) return undefined
+  try {
+    return new URL(baseUrl).pathname.replace(/\/+$/, '') === '' ? baseUrl.replace(/\/+$/, '') : undefined
+  } catch {
+    return undefined
   }
-  return fixed
 }
 
-/**
- * Fill in a missing `/v1` for every OpenAI-compatible provider already in `models.json`.
- *
- * The editor does this when it saves, but the file on disk was written by older versions too — and a
- * bare host keeps working right up to the moment the adapter asks the gateway's web page for a
- * completion. Reading is therefore the second choke point: repair in place so `https://host` simply
- * works without anyone opening the editor. A file with nothing to fix is never rewritten; when there
- * is something to fix the write re-reads the file and only touches the Base URLs it is repairing, so a
- * save landing at the same moment is not undone. Returns the addresses now in effect, keyed by id.
- */
-export async function normalizeModelsJsonFile(): Promise<Record<string, string>> {
-  const file = await readModelsJsonObject().catch(() => ({}) as Record<string, unknown>)
-  const fixed = normalizeProviders(providersOf(file))
-  const addresses: Record<string, string> = {}
-  for (const [id, repair] of Object.entries(fixed)) addresses[id] = repair.to
-  if (Object.keys(fixed).length === 0) return addresses
-  await updateJsonFile<Record<string, unknown>>(modelsPath(), {}, (current) => {
-    const providers = providersOf(current)
-    let changed = false
-    for (const [id, repair] of Object.entries(fixed)) {
-      const config = providers[id]
-      // Only the spelling we actually saw is replaced: anything newer is someone else's decision.
-      if (!config || typeof config !== 'object' || config.baseUrl !== repair.from) continue
-      config.baseUrl = repair.to
-      changed = true
+/** `models.json` as last read, so every request does not re-read the file. */
+let modelsCache: { at: number; providers: ModelsJsonProviders } = { at: 0, providers: {} }
+
+function runtimeModelsConfig(): ModelsJsonProviders {
+  if (Date.now() - modelsCache.at < 1_000) return modelsCache.providers
+  const providers = providersOf(awaitlessRead())
+  modelsCache = { at: Date.now(), providers }
+  return providers
+}
+
+/** Synchronous peek at the file: the fetch wrapper cannot await, and a miss just means "no compat". */
+function awaitlessRead(): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(modelsPath(), 'utf8'))
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
     }
-    if (changed) current.providers = providers
-    return current
-  }).catch(() => undefined)
-  return addresses
+  } catch {
+    // A broken file has nothing to say about addresses; the editor reports it.
+  }
+  return {}
 }
-
-/** `https://host` → `https://host/v1`; anything with a path is returned unchanged. */
-export { withVersionPath }
 
 /**
  * Providers whose endpoint the window may override.
@@ -793,29 +788,16 @@ export async function resolveModelChoice(
  */
 export async function testProvider(providerId: string, modelId?: string): Promise<ProviderTestResult> {
   const started = Date.now()
-  // Repair the address before spending a request on it: a bare OpenAI-compatible host would ask the
-  // gateway's web page for a completion, which is a guaranteed failure with a confusing message. The
-  // runtime is rebuilt when this actually changes something, so the request below uses the new URL.
-  const repaired = await repairBareBaseUrl(providerId)
+  takeFallback(providerId)
   const result = await runProviderTest(providerId, modelId, started)
-  if (!repaired) return result
-  const note = `已自动补全 /v1：${repaired}`
+  // Say what actually happened rather than editing the address: the first request went to the host as
+  // typed, the gateway answered with its web page, and the /v1 retry is what came back with an answer.
+  const fallback = takeFallback(providerId)
+  if (!fallback) return result
+  const note = `地址保持原样；${fallback.from.replace(/^https?:\/\//, '')} 返回了网页，已自动改走 ${fallback.to.replace(/^https?:\/\//, '')}`
   return result.ok
     ? { ...result, detail: note }
     : { ...result, detail: `${note}，但仍然失败：${result.detail ?? ''}` }
-}
-
-/**
- * Fill in a missing `/v1` for this provider, whatever wrote the file (an older version, a hand edit,
- * the pi CLI's own models.json). Returns the address now in effect when it changed.
- */
-async function repairBareBaseUrl(providerId: string): Promise<string | undefined> {
-  const fixed = await normalizeModelsJsonFile().catch(() => ({}) as Record<string, string>)
-  const url = fixed[providerId]
-  if (!url) return undefined
-  // The cached runtime still holds the old models.json: rebuild it so the request uses the new address.
-  resetRuntime()
-  return url
 }
 
 async function runProviderTest(
@@ -915,10 +897,10 @@ async function addressProblem(providerId: string): Promise<string | undefined> {
     } catch {
       return `Base URL 不是合法地址：${baseUrl}`
     }
-    // Deterministic: no request needed to know where `/chat/completions` will land.
-    if (bare && /^openai-/i.test(String(config?.api ?? ''))) {
-      return `Base URL 少了 /v1：适配器会请求 ${baseUrl}/chat/completions，打到的是网页而不是接口（一般应写成 ${baseUrl}/v1）`
-    }
+    // A bare OpenAI-compatible host is not a problem any more: the request is retried under `/v1`
+    // when the gateway answers with its web page (`provider-fetch.ts`), so only a *pathed* address can
+    // still be wrong here.
+    if (bare && /^openai-/i.test(String(config?.api ?? ''))) return undefined
     const key = String(config?.apiKey ?? '').trim() || (await providerApiKey(providerId))
     if (!key) return undefined
     // Ask the address what it serves too: a gateway page answers 200 with HTML.
