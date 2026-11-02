@@ -183,7 +183,9 @@ export class BashTasks {
       const failed = () => {
         if (task.child.exitCode !== null || task.child.signalCode !== null) return
         task.error = '无法终止完整进程树，请检查进程权限；正在尝试结束主进程'
-        task.state = 'failed'
+        // A stop the user asked for stays a stop: the killer falling back to `child.kill()` is a
+        // weaker stop, not a different outcome, and the panel must not show 「失败」 for it.
+        if (task.state !== 'stopped') task.state = 'failed'
         task.child.kill()
       }
       killer.on('error', failed)

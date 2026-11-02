@@ -63,7 +63,10 @@ test('foreground cancellation kills the process tree and explicit background tas
   await assert.rejects(pending, /abort/i)
   const started = await value.run({ cwd: temp, command: 'sleep 2; printf leaked > stop-marker', run_in_background: true })
   const result = await value.stop(taskId(started))
-  assert(body(result).includes('stopped'))
+  // The killer can lose a race with a process that is already exiting; the stop must still read as
+  // a stop rather than turning into a failure (see `kill`).
+  assert(body(result).includes('stopped'), body(result))
+  assert.equal(value.tasks.get(taskId(started)).state, 'stopped')
   await new Promise(resolve => setTimeout(resolve, 2100))
   assert.equal(fs.existsSync(path.join(temp, 'abort-marker')), false)
   assert.equal(fs.existsSync(path.join(temp, 'stop-marker')), false)
