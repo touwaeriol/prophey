@@ -435,7 +435,7 @@ function UserMessage({
               ref={fileRef}
               className="attachment-input"
               type="file"
-              accept="image/*,video/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.log"
+              accept="image/*,video/mp4,video/webm,video/quicktime,video/ogg,.mkv,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.log"
               multiple
               tabIndex={-1}
               aria-hidden

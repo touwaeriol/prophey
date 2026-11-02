@@ -606,7 +606,7 @@ export function Composer({
               ref={fileRef}
               className="attachment-input"
               type="file"
-              accept="image/*,video/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.log"
+              accept="image/*,video/mp4,video/webm,video/quicktime,video/ogg,.mkv,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.log"
               multiple
               tabIndex={-1}
               aria-hidden
@@ -618,8 +618,8 @@ export function Composer({
             <button
               className="attach-btn media-attach"
               disabled={disabled || convertingVideos > 0}
-              title="添加图片或视频（视频本地抽帧，不含音轨）"
-              aria-label="添加图片或视频"
+              title="添加图片、视频或其他文件（视频本地抽帧，不含音轨）"
+              aria-label="添加图片、视频或其他文件"
               onClick={() => fileRef.current?.click()}
             >
               <PaperclipIcon size={16} />

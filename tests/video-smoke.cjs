@@ -6,6 +6,7 @@ const path = require('node:path')
 module.exports = async function videoSmoke(evaluate, until, window) {
   try {
     await until(() => evaluate('!!document.querySelector(".composer textarea:not(:disabled)")'), 'composer')
+    assert.equal(await evaluate('!!document.querySelector(".composer")'), true)
     assert.equal(await evaluate('!!document.querySelector(".media-attach")'), true)
     assert.equal(await evaluate('document.querySelector(".attachment-input").accept.includes("video/mp4")'), true)
     // A previous smoke module can leave a draft behind (composer state is persisted per session),
