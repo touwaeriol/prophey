@@ -25,6 +25,30 @@ export interface ChatItem {
   timestamp?: number
 }
 
+/** The desktop tool that starts a run: these get a card of their own instead of a generic row. */
+export function isSubagentStart(name: string): boolean {
+  return name.endsWith('start_subagent')
+}
+
+/**
+ * A round that only ran tools, with nothing said around them.
+ *
+ * One model round ends in one assistant message, so a long task arrives as a run of these. Visually
+ * they are one block of work: the transcript closes the gap between them and merges their borders
+ * instead of drawing a stack of separate answers.
+ */
+export function isToolOnly(item: ChatItem): boolean {
+  return (
+    item.role === 'assistant' &&
+    !item.pending &&
+    !item.error &&
+    !item.thinking &&
+    !item.text.trim() &&
+    item.toolCalls.length > 0 &&
+    item.toolCalls.every((call) => !isSubagentStart(call.name))
+  )
+}
+
 interface RawBlock {
   type?: string
   text?: string

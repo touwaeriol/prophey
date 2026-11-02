@@ -51,8 +51,33 @@ module.exports = async function toolSpacingSmoke(evaluate, until, window) {
     assert.equal(measured.gap, '0px', 'the list itself adds no gap')
     assert.notEqual(measured.radiusFirst, '0px', 'the block keeps rounded outer corners')
     assert.notEqual(measured.radiusLast, '0px', 'top and bottom are both rounded')
+
+    // The same rule across rounds: one model round is one assistant message, so a long task arrives
+    // as a run of these. The transcript's own 10px gap made them a stack of separate answers.
+    window.webContents.send('pi:event', { type: 'message_end', message: { role: 'assistant', content: [] }, sessionKey: key })
+    window.webContents.send('pi:event', { type: 'message_start', message: { role: 'assistant', content: [] }, sessionKey: key })
+    window.webContents.send('pi:event', {
+      type: 'tool_execution_start', toolCallId: 'spacing-next', toolName: 'run_bash', args: { command: 'echo next' }, sessionKey: key
+    })
+    await until(
+      () => evaluate("document.querySelectorAll('.message.assistant.tool-only').length >= 2"),
+      'two consecutive tool-only rounds'
+    )
+    const across = await evaluate(`(() => {
+      const rounds = [...document.querySelectorAll('.message.assistant.tool-only')]
+      const before = rounds[rounds.length - 2].querySelector('.tool-card:last-of-type')
+      const after = rounds[rounds.length - 1].querySelector('.tool-card')
+      return {
+        gap: Math.round((after.getBoundingClientRect().top - before.getBoundingClientRect().bottom) * 100) / 100,
+        radiusTop: getComputedStyle(after).borderTopLeftRadius,
+        radiusBottom: getComputedStyle(before).borderBottomLeftRadius
+      }
+    })()`)
+    assert.equal(across.gap, -1, `two rounds share one border line (${across.gap})`)
+    assert.equal(across.radiusTop, '0px', 'the joining edge is square')
+    assert.equal(across.radiusBottom, '0px', 'the joining edge is square on both sides')
   } finally {
     window.webContents.send('pi:status', idle)
   }
-  console.log('Tool spacing passed: consecutive calls stack into one block with a single shared border')
+  console.log('Tool spacing passed: consecutive calls stack into one block with a single shared border, across rounds too')
 }

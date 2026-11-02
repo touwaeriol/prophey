@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { SubagentView } from '@shared/types'
-import type { ChatItem, MessageImage, ToolCallView } from '../lib/messages'
+import { isSubagentStart, isToolOnly, type ChatItem, type MessageImage, type ToolCallView } from '../lib/messages'
 import { Markdown } from './Markdown'
 import { DraftImageStrip, ImageLightbox, MessageImages } from './ImageLightbox'
 import { AttachmentStrip } from './AttachmentStrip'
@@ -24,11 +24,6 @@ const FIRST_WINDOW = 20
 const WINDOW_STEP = 20
 /** Distance from the top of the transcript (px) that asks for the previous window. */
 const GROW_DISTANCE = 320
-
-/** The desktop tool that starts a run: these get a card of their own instead of a generic row. */
-function isSubagentStart(name: string): boolean {
-  return name.endsWith('start_subagent')
-}
 
 function subagentIdFrom(text: string | undefined): string | undefined {
   return /sa_[0-9a-f]{6,}/.exec(text ?? '')?.[0]
@@ -225,7 +220,10 @@ const Message = memo(function Message({
   const starts = item.toolCalls.filter((call) => isSubagentStart(call.name))
   const others = item.toolCalls.filter((call) => !isSubagentStart(call.name))
   return (
-    <article className="message assistant" data-message-id={item.id}>
+    <article
+      className={`message assistant ${isToolOnly(item) ? 'tool-only' : ''}`}
+      data-message-id={item.id}
+    >
       <div className="assistant-body">
         {item.thinking && <Thinking text={item.thinking} />}
         {item.text && <Markdown>{item.text}</Markdown>}

@@ -499,8 +499,10 @@ npm run typecheck    # node + web 两个 tsconfig 分别检查
 
 ## 0.6.32 连续工具调用并成一块
 
+- **不只是块内**（0.6.38 补齐）：一轮 = 一条 assistant 消息，所以长任务里连续的 `run_bash` / `read_bash_task` 是**一串同级 article**，`.conversation` 的 `gap: 10px` 让它们又变回一叠互不相干的回答——前一次只合并了同一轮内的调用。现在 `lib/messages.ts` 的 `isToolOnly()` 给「只有工具调用、没有正文/思考/错误（且不是 `start_subagent`）」的 article 加 `.tool-only`，CSS 用 `.tool-only + .tool-only` 把间距改成 `-11px`（10px 间距 + 1px 共用边）并把接合处的圆角压成 0。系统的子代理通知夹在中间时自然断块。回归写在同一条冒烟里（第二段：结束一轮后再开一轮，断言跨 article 也是 `-1`）。
+
 - **一轮里连着的工具卡片合成一个块**（用户要求）：以前 `.tool-list` 是 `gap: 2px`，相邻两张卡各有一条 1px 边框对着，所以十次调用看着像十个互不相干的对象，还白吃一段纵向空间。现在 `gap: 0`、`.tool-card + .tool-card { margin-top: -1px }` 让两张卡共用一条边线，圆角只留整块的首尾（`:not(:first-child)` / `:not(:last-child)`）。回归 `tests/tool-spacing-smoke.cjs`：先发 assistant `message_start`（工具事件本身不会创建 assistant 条目，`patchLastAssistant` 找不到就直接返回），再发三条 `tool_execution_start`，断言相邻卡片 `top - prev.bottom === -1`、list `row-gap: 0px`、首尾仍有圆角。
-- 注意：`.tool-card` / `.tool-list` 只被 `Conversation.tsx` 的 `ToolList`/`ToolCard` 使用，改样式不会波及子代理卡片等其他组件。
+- 注意：`.tool-card` / `.tool-list` 只被 `Conversation.tsx` 的 `ToolList`/`ToolCard` 使用，改样式不会波及子代理卡片等其他组件。**不要**为“看起来少一点”去跨消息合并思考块或工具（数据层），合并只发生在样式层。
 
 ## 0.6.33 待发送的消息回到它自己的位置
 

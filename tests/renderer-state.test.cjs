@@ -10,7 +10,7 @@ for (const name of ['conversation-events', 'composer', 'messages', 'session-grou
 }
 after(() => fs.rmSync(temp, { recursive: true, force: true }))
 const { applyConversationEvent: apply } = require(path.join(temp, 'conversation-events.cjs'))
-const { toChatItems } = require(path.join(temp, 'messages.cjs'))
+const { toChatItems, isToolOnly } = require(path.join(temp, 'messages.cjs'))
 const { insertFileMention } = require(path.join(temp, 'composer.cjs'))
 const { SIDEBAR_OPEN_KEY, PANEL_OPEN_KEY, readLayoutFlag, writeLayoutFlag } = require(path.join(temp, 'layout-prefs.cjs'))
 const { rememberScroll, recallScroll, restoreScroll, STICK_DISTANCE } = require(path.join(temp, 'session-scroll.cjs'))
@@ -37,6 +37,23 @@ test('renderer: a reloaded history message keeps its attachment block and still 
   // A file-only message has no prose left, and an ordinary message is left alone.
   assert.equal(stripAttachments('【附件】本机文件，用 read_file 读绝对路径\n- - · /tmp/a.txt').prose, '')
   assert.equal(stripAttachments('就一句普通的话').files.length, 0)
+})
+
+test('renderer: a round that only ran tools is marked so the transcript can merge it', () => {
+  const tool = (name = 'run_bash') => ({ id: 't1', name, args: '{}', status: 'done' })
+  const base = { id: 'a', role: 'assistant', text: '', toolCalls: [tool()] }
+  assert.equal(isToolOnly(base), true)
+  // Still one block while it runs: the tail of a long chain must not open a gap of its own.
+  assert.equal(isToolOnly({ ...base, streaming: true }), true)
+  assert.equal(isToolOnly({ ...base, thinking: '想一想' }), false)
+  assert.equal(isToolOnly({ ...base, text: '说明' }), false)
+  assert.equal(isToolOnly({ ...base, error: '失败' }), false)
+  assert.equal(isToolOnly({ ...base, toolCalls: [] }), false)
+  assert.equal(isToolOnly({ ...base, role: 'user' }), false)
+  // A subagent start draws a card of its own, so it is not part of a plain tool block.
+  assert.equal(isToolOnly({ ...base, toolCalls: [tool('start_subagent')] }), false)
+  // Whitespace-only text is not prose.
+  assert.equal(isToolOnly({ ...base, text: '\n ' }), true)
 })
 
 test('renderer: the context meter reads the same in the composer, the panel and a subagent row', () => {

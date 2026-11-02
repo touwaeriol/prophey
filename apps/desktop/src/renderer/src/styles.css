@@ -6148,6 +6148,28 @@ body.resizing-sidebar * {
   border-bottom-right-radius: 0;
 }
 
+/*
+ * A round that only ran tools continues the block above it.
+ *
+ * One model round ends in one assistant message, so a long task arrives as dozens of these and the
+ * transcript's own gap turned them into a stack of separate answers. The pair closes that gap and
+ * merges the border the same way a single round's calls are merged — the run reads as one block.
+ */
+.message.assistant.tool-only + .message.assistant.tool-only {
+  /* The transcript gap, plus the 1px the two borders share. */
+  margin-top: -11px;
+}
+
+.message.assistant.tool-only + .message.assistant.tool-only > .assistant-body > .tool-list > .tool-card:first-child {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.message.assistant.tool-only:has(+ .message.assistant.tool-only) > .assistant-body > .tool-list > .tool-card:last-child {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .card-chevron {
   flex: none;
   color: var(--faint);
