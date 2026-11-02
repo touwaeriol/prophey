@@ -49,6 +49,13 @@ export interface PiStatus {
   /** Stable sidebar identity; sessionFile remains the engine-private storage location. */
   sessionKey?: string;
   isStreaming?: boolean;
+  /**
+   * The own engine ended the round on purpose to wait for background work (a subagent, a command).
+   *
+   * Distinct from `isStreaming`: nothing is running and the session is not idle either — it wakes
+   * itself when the work reports in, so the window must keep counting it as busy.
+   */
+  waiting?: { kind: "subagent" | "bash"; label?: string; since: number };
   /** pi is rewriting the context; prompts are refused until it finishes. */
   compacting?: boolean;
   /** Percentage of the window at which auto-compaction starts; absent when it is off. */
@@ -741,6 +748,10 @@ export interface PiBridge {
   openAgentDir(): Promise<void>;
   openExternal(url: string): Promise<void>;
   copyImage(dataUrl: string): Promise<{ ok: boolean; error?: string }>;
+  /** Real path of a dropped or pasted `File`; `File.path` is gone since Electron 32. */
+  pathForFile(file: File): string;
+  /** Absolute paths of the files on the clipboard (CF_HDROP); empty when there are none. */
+  clipboardFilePaths(): Promise<string[]>;
   /** Mirror one session's draft/images/queue to disk; the main process debounces the write. */
   saveComposer(key: string, entry: unknown): Promise<void>;
   /** Every mirrored entry, as the JSON shape `localStorage` holds (null when nothing is saved). */

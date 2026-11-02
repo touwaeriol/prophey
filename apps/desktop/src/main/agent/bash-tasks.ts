@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { closeSync, mkdirSync, openSync, promises as fs } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import type { CoreTool } from './core-tools'
+import type { CoreTool, DeferredResult } from './core-tools'
 import { killTree } from '../proc'
 
 type Result = Awaited<ReturnType<CoreTool['call']>>
@@ -20,6 +20,18 @@ interface Task {
   timer?: ReturnType<typeof setTimeout>
 }
 const text = (value: string, isError = false): Result => ({ content: [{ type: 'text', text: value }], isError })
+
+/**
+ * Park marker for a command that is still running.
+ *
+ * Waiting inside the tool call holds the round open and blocks the model for up to a minute; ending
+ * the round instead lets the completion notice wake it with the output the model actually wanted.
+ */
+function parkInfo(task: Task): DeferredResult {
+  return { kind: 'bash', keys: [task.id], label: `等待命令 ${task.id}` }
+}
+
+const PARK_NOTE = '（仍在运行：本回合到此结束，完成时会唤醒你；不必轮询，继续读用 read_bash_task）'
 const bounded = (value: unknown, fallback: number, min: number, max: number) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.floor(value))) : fallback
 
@@ -115,7 +127,14 @@ export class BashTasks {
       signal?.throwIfAborted()
       task.background = task.state === 'running'
       this.changed()
-      return await this.read({ task_id: id, tail: true, max_bytes: 4000 })
+      const peek = await this.read({ task_id: id, tail: true, max_bytes: 4000 })
+      // The command outlived its yield window: hand the turn back instead of holding it open.
+      if (task.state !== 'running') return peek
+      return {
+        ...peek,
+        content: [...peek.content, { type: 'text', text: PARK_NOTE }],
+        deferred: parkInfo(task)
+      }
     } finally {
       clearTimeout(yieldTimer)
       signal?.removeEventListener('abort', abort)
@@ -131,20 +150,7 @@ export class BashTasks {
   async read(args: Record<string, unknown>, signal?: AbortSignal): Promise<Result> {
     const task = this.get(args.task_id)
     signal?.throwIfAborted()
-    if (task.state === 'running' && bounded(args.wait_ms, 0, 0, 60000) > 0) {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      let abort: (() => void) | undefined
-      try {
-        await Promise.race([task.done, new Promise<void>((resolve, reject) => {
-          timer = setTimeout(resolve, bounded(args.wait_ms, 0, 0, 60000))
-          abort = () => reject(new Error('已取消等待；后台命令仍在运行'))
-          signal?.addEventListener('abort', abort, { once: true })
-        })])
-      } finally {
-        clearTimeout(timer)
-        if (abort) signal?.removeEventListener('abort', abort)
-      }
-    }
+    const parked = task.state === 'running' && bounded(args.wait_ms, 0, 0, 60000) > 0
     const handle = await fs.open(task.file, 'r')
     try {
       const size = (await handle.stat()).size
@@ -164,7 +170,9 @@ export class BashTasks {
       const next = offset + end
       const header = `${task.id} · ${task.state} · 退出码 ${task.code ?? '待定'}\n日志：${task.file}\n${size} bytes；本次 ${offset + start}–${next}；下一游标 offset=${next}${next < size ? '（还有输出）' : ''}`
       const body = args.status_only === true ? '' : '\n' + (buffer.subarray(start, end).toString('utf8') || '（暂无输出）')
-      return text(header + (task.error ? '\n' + task.error : '') + body, task.state === 'failed')
+      const result = text(header + (task.error ? '\n' + task.error : '') + body, task.state === 'failed')
+      if (!parked) return result
+      return { ...result, content: [...result.content, { type: 'text', text: PARK_NOTE }], deferred: parkInfo(task) }
     } finally { await handle.close() }
   }
 
@@ -192,6 +200,11 @@ export class BashTasks {
       this.kill(task)
       await task.done
       this.changed()
+      // Stopping by hand is not a completion, so `finish` stays quiet; a parked turn still has to
+      // hear about it, otherwise it sits waiting on a command that will never report again.
+      if (task.background && !this.disposed) {
+        this.options.notify(`命令 ${task.id} 已被手动停止。日志：${task.file}`)
+      }
     }
     return this.read({ task_id: id, status_only: true })
   }
@@ -212,7 +225,7 @@ export class BashTasks {
     return [
       {
         name: 'read_bash_task',
-        description: 'Read bounded output or status of a command. Reuse the returned byte offset for new output; tail reads the end. Set wait_ms to wait for completion (max 60000) rather than polling. Completion is also notified automatically.',
+        description: 'Read bounded output or status of a command. Reuse the returned byte offset for new output; tail reads the end. With wait_ms > 0 a still-running command parks instead of blocking: the round ends and the completion wakes you, so one round trip is not spent sitting in the tool.',
         parameters: { type: 'object', properties: {
           task_id: { type: 'string' }, offset: { type: 'integer', minimum: 0 },
           max_bytes: { type: 'integer', minimum: 256, maximum: 12000 },

@@ -1,4 +1,6 @@
 import { copyImageToClipboard } from './image-clipboard'
+import { clipboardFilePaths } from './clipboard-files'
+import { revealTarget } from './reveal-policy'
 import { ImportedHistoryStore } from './imported-history-store'
 import { writeJsonAtomic } from './storage'
 import { listEngineCommands, executeEngineCommand } from './engine-commands'
@@ -7,7 +9,7 @@ import { recentDirectories } from '../shared/recent-directories'
 import { checkWarpgrepEndpoint } from '../shared/warpgrep-endpoint'
 import { compactionRatio, compactionPercent, reserveFor, ratioFromPercent, ratioFromTokens } from './compaction-policy'
 import { isNativeSessionReference, type EngineId } from '../shared/engine'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, promises as fs, unlinkSync } from 'node:fs'
 import os from 'node:os'
@@ -1589,11 +1591,12 @@ function statusSnapshot(): PiStatus {
   const running = new Set((subagents?.list() ?? [])
     .filter(item => !item.restored && (item.status === 'starting' || item.status === 'streaming') && item.parentSession)
     .map(item => toSummaryKey(item.parentSession!)))
-  if (status.sessionFile && (status.isStreaming || status.compacting || status.backgroundTasks?.length)) running.add(toSummaryKey(status.sessionFile))
+  // A parked session is waiting on background work: busy to the eye, so it stays lit.
+  if (status.sessionFile && (status.isStreaming || status.compacting || status.waiting || status.backgroundTasks?.length)) running.add(toSummaryKey(status.sessionFile))
   // Runs that kept going off screen still light up their session row.
   for (const slot of parkedEngines.values()) {
     const file = slot.status.sessionFile
-    if (file && (slot.engine.busy() || slot.engine.compacting() || slot.status.backgroundTasks?.length)) {
+    if (file && (slot.engine.busy() || slot.engine.compacting() || slot.status.waiting || slot.status.backgroundTasks?.length)) {
       running.add(toSummaryKey(file))
     }
   }
@@ -2519,20 +2522,11 @@ function registerIpc(): void {
     const roots = [workspace?.primary, ...(workspace?.additional ?? [])].filter(
       (root): root is string => typeof root === 'string' && root !== ''
     )
-    const real = async (value: string): Promise<string | undefined> => {
-      try {
-        return await fs.realpath(value)
-      } catch {
-        return undefined
-      }
-    }
-    const resolved = await real(path.resolve(String(target ?? '')))
-    if (!resolved) return { ok: false, error: '文件不存在或已被删除' }
-    const inside = (
-      await Promise.all(roots.map((root) => real(path.resolve(root))))
-    ).some((root) => root && (resolved === root || resolved.startsWith(root + path.sep)))
-    if (!inside) return { ok: false, error: '只能打开当前会话目录里的文件' }
-    shell.showItemInFolder(resolved)
+    // A pasted attachment lives outside the workspace, so files are allowed anywhere; see
+    // `revealTarget`.
+    const result = await revealTarget(target, roots)
+    if (!result.ok) return result
+    shell.showItemInFolder(result.path)
     return { ok: true }
   })
 
@@ -2543,6 +2537,11 @@ function registerIpc(): void {
   })
 
   handle('app:copy-image', (_event, dataUrl: unknown) => copyImageToClipboard(dataUrl))
+
+  // Files copied in Explorer or a WeChat chat are a CF_HDROP list of paths. Chromium usually turns
+  // that into a DataTransfer, but not always (and never for the formats it does not model), so the
+  // renderer asks here when a paste arrives empty.
+  handle('clipboard:file-paths', () => clipboardFilePaths())
 
   // The renderer's own copy lives in localStorage; these two mirror it to disk so a crash cannot
   // swallow the last seconds of typing (localStorage's LevelDB commit is batched, see

@@ -9,6 +9,25 @@ import type { Tool } from '@earendil-works/pi-ai'
  * JS with node builtins only, served over MCP. Loading the same file here means one implementation
  * for both engines instead of a second copy that drifts.
  */
+/**
+ * A tool that gave up its turn instead of blocking on it.
+ *
+ * A tool call is a synchronous hole in the loop: waiting inside it keeps the round open, so the
+ * model cannot be woken by anything but the timeout. A deferred result ends the round instead and
+ * the arrival wakes a new one — the transcript still gets a plain tool result, which is what makes
+ * the order valid.
+ */
+export interface DeferredResult {
+  /** Which kind of background work is being waited for; the window groups them by this. */
+  kind: 'subagent' | 'bash'
+  /** Ids the caller should be woken about (subagent ids, command ids). */
+  keys: string[]
+  /** One line for the status bar, e.g. `等待 1 个子代理`. */
+  label?: string
+  /** Wake anyway after this long, so a stuck task cannot park the session forever. */
+  timeoutMs?: number
+}
+
 export interface CoreTool {
   name: string
   /**
@@ -27,6 +46,13 @@ export interface CoreTool {
   ): Promise<{
     content: Array<{ type: string; text?: string }>
     isError?: boolean
+    /**
+     * Set when the tool parked: the engine settles the round after writing this result.
+     *
+     * Only the own engine reads it. pi's tools reach the model over MCP, where the field is dropped
+     * by serialisation, so a pi run simply keeps the old blocking behaviour.
+     */
+    deferred?: DeferredResult
   }>
 }
 
@@ -121,7 +147,13 @@ function adaptModuleTool(tool: ModuleTool, context: Record<string, unknown> = {}
     name: tool.name,
     description: tool.description ?? tool.name,
     parameters: tool.inputSchema ?? { type: 'object', properties: {} },
-    call: (args, signal) => tool.call(args ?? {}, { ...context, signal })
+    call: async (args, signal): ReturnType<CoreTool['call']> => {
+      const result = await tool.call(args ?? {}, { ...context, signal })
+      // The JS modules (`packages/mcp-core/**`) return this field for the own engine; MCP clients
+      // just ignore it.
+      const deferred = (result as { deferred?: DeferredResult } | undefined)?.deferred
+      return deferred ? { ...result, deferred } : result
+    }
   }
 }
 

@@ -1,0 +1,29 @@
+﻿2026-10-24T19:01:58.1472957Z ##[group]Run npm ci
+2026-10-24T19:01:58.1473168Z [36;1mnpm ci[0m
+2026-10-24T19:01:58.2167316Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-24T19:01:58.2167536Z ##[endgroup]
+2026-10-24T19:02:01.6827565Z npm warn deprecated rimraf@2.6.3: Rimraf versions prior to v4 are no longer supported
+2026-10-24T19:02:02.8788744Z npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+2026-10-24T19:02:02.9545593Z npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+2026-10-24T19:02:03.8082876Z npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+2026-10-24T19:02:04.5506389Z npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+2026-10-24T19:02:05.1176843Z npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+2026-10-24T19:02:13.8068230Z 
+2026-10-24T19:02:13.8069471Z added 634 packages, and audited 637 packages in 15s
+2026-10-24T19:02:13.8069772Z 
+2026-10-24T19:02:13.8069941Z 177 packages are looking for funding
+2026-10-24T19:02:13.8070994Z   run `npm fund` for details
+2026-10-24T19:02:13.8103347Z 
+2026-10-24T19:02:13.8103633Z 2 vulnerabilities (1 moderate, 1 high)
+2026-10-24T19:02:13.8105856Z 
+2026-10-24T19:02:13.8106509Z To address all issues (including breaking changes), run:
+2026-10-24T19:02:13.8106825Z   npm audit fix --force
+2026-10-24T19:02:13.8106974Z 
+2026-10-24T19:02:13.8107074Z Run `npm audit` for details.
+2026-10-24T19:02:13.8116173Z npm warn install-scripts 4 packages have install scripts not yet covered by allowScripts:
+2026-10-24T19:02:13.8116847Z npm warn install-scripts   @google/genai@2.21.0 (preinstall: echo 'preinstall: no-op')
+2026-10-24T19:02:13.8117503Z npm warn install-scripts   electron-winstaller@5.4.0 (install: node ./script/select-7z-arch.js)
+2026-10-24T19:02:13.8118140Z npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+2026-10-24T19:02:13.8118679Z npm warn install-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+2026-10-24T19:02:13.8119074Z npm warn install-scripts
+2026-10-24T19:02:13.8119582Z npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.

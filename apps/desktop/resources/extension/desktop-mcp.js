@@ -14,11 +14,16 @@
 const CORE_SERVER = 'desktop'
 const ASK_TOOL = 'mcp__desktop__ask_user_question'
 const START_SUBAGENT_TOOL = 'mcp__desktop__start_subagent'
+const READ_TOOL = 'mcp__desktop__read_file'
+const WAIT_SUBAGENT_TOOL = 'mcp__desktop__wait_subagent'
+const READ_BASH_TASK_TOOL = 'mcp__desktop__read_bash_task'
 const WEB_SEARCH_TOOL = 'mcp__web__web_search'
 const WEB_FETCH_TOOL = 'mcp__web__web_fetch'
 const PROMPT_SECTION = 'desktop_tools'
 const AGENTS_SECTION = 'subagents'
 const WEB_SECTION = 'web_tools'
+const ATTACHMENT_SECTION = 'attachments'
+const BACKGROUND_SECTION = 'background'
 const PROJECT_SECTION = 'project'
 const CONVENTIONS_SECTION = 'conventions'
 
@@ -89,6 +94,38 @@ const WEB_GUIDANCE = [
   'pages do not support an answer instead of filling the gap from memory.',
   '',
   'Local and private addresses are refused by design; use the repository tools or bash for those.'
+].join('\n')
+
+/**
+ * Pasted attachments.
+ *
+ * The user can drop a file from WeChat or Explorer into the composer; it arrives as a 「【附件】」
+ * block of absolute paths. Those usually live outside the workspace, so the model has to read them
+ * by absolute path instead of resolving them against the working directory.
+ */
+const ATTACHMENT_GUIDANCE = [
+  'A 「【附件】」 block in a message is a list of paths on this machine (pasted from a chat window,',
+  'the desktop or a file manager). They are usually outside the workspace: open them with',
+  '`mcp__desktop__read_file` and the absolute path.',
+  '',
+  'Read a large file in chunks, and check what a pdf/docx/xlsx really yields before summarizing it.',
+  'When a path no longer exists, say so instead of guessing a neighbour.'
+].join('\n')
+
+/**
+ * Background work never needs to be waited on.
+ *
+ * `wait_subagent` / `read_bash_task` hand the round back while the target is still running, and the
+ * app appends a notice (triggering a turn) when it finishes. Without this the model sits in a tool
+ * call for minutes, or loops on `get_subagent` and spends a round trip per check.
+ */
+const BACKGROUND_GUIDANCE = [
+  '`mcp__desktop__wait_subagent` and `mcp__desktop__read_bash_task` do not block: while the target',
+  'still runs they end the turn, and the app wakes you with the result when it finishes.',
+  '',
+  'So do not call them twice in a row and do not poll `mcp__desktop__get_subagent`: do other work, or',
+  'just stop and wait to be woken. While background work is open, never claim it is finished — the',
+  'notice or `get_subagent` is what says so.'
 ].join('\n')
 
 /**
@@ -363,6 +400,15 @@ export default function desktopMcp(pi) {  const url = process.env.AGENT_DESKTOP_
     if (active.includes(WEB_SEARCH_TOOL) || active.includes(WEB_FETCH_TOOL)) {
       sections[WEB_SECTION] = WEB_GUIDANCE
     } else delete sections[WEB_SECTION]
+
+    // And for pasted files: without the reader the block is just text.
+    if (active.includes(READ_TOOL)) sections[ATTACHMENT_SECTION] = ATTACHMENT_GUIDANCE
+    else delete sections[ATTACHMENT_SECTION]
+
+    // And for background work: without the waiting tools there is nothing to explain.
+    if (active.includes(WAIT_SUBAGENT_TOOL) || active.includes(READ_BASH_TASK_TOOL)) {
+      sections[BACKGROUND_SECTION] = BACKGROUND_GUIDANCE
+    } else delete sections[BACKGROUND_SECTION]
 
     // Unconditional: these are about how the run uses whatever tools it has. Guidelines land in
     // `<rules>`; pushing the same strings twice would duplicate them, so check first.

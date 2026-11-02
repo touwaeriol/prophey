@@ -5,7 +5,7 @@ const os = require('node:os')
 const path = require('node:path')
 const esbuild = require('esbuild')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'prophey-renderer-tests-'))
-for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'session-scroll', 'actions', 'subagents', 'layout-prefs', 'video', 'context-usage']) {
+for (const name of ['conversation-events', 'composer', 'messages', 'session-groups', 'session-messages', 'session-scroll', 'actions', 'subagents', 'layout-prefs', 'video', 'context-usage', 'attachments']) {
   esbuild.buildSync({ entryPoints: [path.resolve(__dirname, '../apps/desktop/src/renderer/src/lib', name + '.ts')], outfile: path.join(temp, name + '.cjs'), bundle: true, platform: 'node', format: 'cjs' })
 }
 after(() => fs.rmSync(temp, { recursive: true, force: true }))
@@ -17,6 +17,27 @@ const { rememberScroll, recallScroll, restoreScroll, STICK_DISTANCE } = require(
 const event = (items, type, fields = {}) => apply(items, { type, ...fields }, 123)
 const { isVideo, videoTimes, videoFramePrompt } = require(path.join(temp, 'video.cjs'))
 const { contextLabel, usageMeter, usagePair, usageTone } = require(path.join(temp, 'context-usage.cjs'))
+const { stripAttachments } = require(path.join(temp, 'attachments.cjs'))
+
+test('renderer: a reloaded history message keeps its attachment block and still renders as files', () => {
+  // History is written once and read back by a different process, so the block has to survive the
+  // whole path: transcript → getMessages → toChatItems — and only then become chip rows.
+  const stored = '帮我看看这个\n\n【附件】本机文件，用 read_file 读绝对路径\n- 2.4 MB · D:\\WeChat Files\\wxid_x\\报告.pdf'
+  const items = toChatItems([
+    { role: 'user', content: stored, timestamp: 1 },
+    { role: 'user', content: [{ type: 'text', text: stored }], timestamp: 2 }
+  ])
+  assert.equal(items.length, 2)
+  for (const item of items) {
+    assert.equal(item.text, stored, '文本原样保留，不提前拆解')
+    const { prose, files } = stripAttachments(item.text)
+    assert.equal(prose, '帮我看看这个')
+    assert.deepEqual(files.map((file) => file.path), ['D:\\WeChat Files\\wxid_x\\报告.pdf'])
+  }
+  // A file-only message has no prose left, and an ordinary message is left alone.
+  assert.equal(stripAttachments('【附件】本机文件，用 read_file 读绝对路径\n- - · /tmp/a.txt').prose, '')
+  assert.equal(stripAttachments('就一句普通的话').files.length, 0)
+})
 
 test('renderer: the context meter reads the same in the composer, the panel and a subagent row', () => {
   // Subagent rows and cards show the one-liner; 0 and missing values must not print "0K".
@@ -90,7 +111,7 @@ test('renderer: a steered message that only now lands gets its own bubble, once'
   assert.equal(settled[0].pending, false)
 })
 
-test('renderer: compaction replaces the transcript with the summary it stored', () => {
+test('renderer: compaction appends the summary and keeps the conversation', () => {
   let items = event([], 'message_start', { message: { role: 'user', content: '第一句' } })
   items = event(items, 'message_end', { message: { role: 'user', content: '第一句' } })
   items = event(items, 'message_start', { message: { role: 'assistant' } })
@@ -101,14 +122,45 @@ test('renderer: compaction replaces the transcript with the summary it stored', 
     summary: '目标：修好登录。',
     message: { role: 'user', content: summary, timestamp: 5 }
   })
-  assert.equal(compacted.length, 1, 'turns the model can no longer see are gone')
-  assert.equal(compacted[0].role, 'user', 'the summary is a user message, so it renders and edits like one')
-  assert.equal(compacted[0].text, summary)
-  assert.equal(compacted[0].pending, undefined)
-  assert.equal(compacted[0].timestamp, 5)
+  // The user asked to still see the conversation they had: the summary is inserted where the
+  // compaction happened, it does not replace what came before.
+  assert.equal(compacted.length, 3, 'the turns stay in the window')
+  assert.equal(compacted[0].text, '第一句')
+  assert.equal(compacted[2].role, 'user', 'the summary is a user message, so it renders and edits like one')
+  assert.equal(compacted[2].text, summary)
+  assert.equal(compacted[2].pending, undefined)
+  assert.equal(compacted[2].timestamp, 5)
   // Engines that compact privately (Claude / Codex) carry no message: their transcript stays theirs.
   assert.equal(event(items, 'compaction_end', {}).length, 2)
-  assert.equal(event(items, 'compaction_end', { message: { role: 'user', content: '   ' } }).length, 2, 'an empty summary never wipes the window')
+  assert.equal(event(items, 'compaction_end', { message: { role: 'user', content: '   ' } }).length, 2, 'an empty summary changes nothing')
+})
+
+test('renderer: a tool call streamed as text never stays on screen as markup', () => {
+  const markup = '我先了解一下。\n\n<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name="run_bash">\n<｜｜DSML｜｜ parameter name="command" string="true">ls</｜｜DSML｜｜ parameter>\n</｜｜DSML｜｜ invoke>\n<｜｜DSML｜｜ calls>'
+  let items = event([], 'message_start', { message: { role: 'assistant' } })
+  // Deltas arrive as plain text: the bubble is painted with the raw markup before anything knows it
+  // was a tool call.
+  items = event(items, 'message_update', { assistantMessageEvent: { type: 'text_delta', delta: markup } })
+  assert.match(items[0].text, /DSML/)
+  // The engine repaired it: the finished message carries the call, and the prose only.
+  items = event(items, 'message_end', {
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: '我先了解一下。' },
+        { type: 'toolCall', id: 'call_1', name: 'run_bash', arguments: { command: 'ls' } }
+      ]
+    }
+  })
+  assert.equal(items[0].text, '我先了解一下。', 'the prose replaces the streamed markup')
+  assert.equal(items[0].toolCalls[0].name, 'run_bash')
+
+  // Markup that parsed into nothing: the finished message has no text block at all, and the bubble
+  // still has to drop what it painted.
+  let bare = event([], 'message_start', { message: { role: 'assistant' } })
+  bare = event(bare, 'message_update', { assistantMessageEvent: { type: 'text_delta', delta: '<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name="run_' } })
+  bare = event(bare, 'message_end', { message: { role: 'assistant', content: [] } })
+  assert.equal(bare[0].text, '', 'an unparsable call block leaves no markup behind')
 })
 
 test('renderer: tool completion preserves arguments and survives final assistant snapshot', () => {

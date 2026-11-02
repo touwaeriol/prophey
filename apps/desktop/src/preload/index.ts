@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppUpdateSnapshot,
   AskAnswer,
@@ -85,6 +85,8 @@ const bridge: PiBridge = {
   openAgentDir: () => ipcRenderer.invoke('pi:open-agent-dir') as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url) as Promise<void>,
   copyImage: (dataUrl: string) => ipcRenderer.invoke('app:copy-image', dataUrl),
+  pathForFile: (file: File) => webUtils.getPathForFile(file),
+  clipboardFilePaths: () => ipcRenderer.invoke('clipboard:file-paths') as Promise<string[]>,
   saveComposer: (key: string, entry: unknown) =>
     ipcRenderer.invoke('composer:save', key, entry) as Promise<void>,
   loadComposers: () => ipcRenderer.invoke('composer:load') as Promise<string | null>,

@@ -1,0 +1,390 @@
+﻿2026-10-24T19:01:45.3265313Z Current runner version: '2.338.0'
+2026-10-24T19:01:45.3284298Z ##[group]Runner Image Provisioner
+2026-10-24T19:01:45.3284817Z Hosted Compute Agent
+2026-10-24T19:01:45.3285150Z Version: 20261021.618
+2026-10-24T19:01:45.3285497Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-10-24T19:01:45.3285907Z Build Date: 2026-10-21T00:45:21Z
+2026-10-24T19:01:45.3286327Z Worker ID: {e93cc7c5-8b78-4e0a-8360-4206b90b3189}
+2026-10-24T19:01:45.3286714Z Region: westus3
+2026-10-24T19:01:45.3287054Z Cloud: Azure
+2026-10-24T19:01:45.3287381Z ##[endgroup]
+2026-10-24T19:01:45.3288104Z ##[group]Operating System
+2026-10-24T19:01:45.3288450Z Microsoft Windows Server 2025
+2026-10-24T19:01:45.3288780Z 10.0.26100
+2026-10-24T19:01:45.3289074Z Datacenter
+2026-10-24T19:01:45.3289372Z ##[endgroup]
+2026-10-24T19:01:45.3289669Z ##[group]Runner Image
+2026-10-24T19:01:45.3290004Z Image: windows-2025-vs2026
+2026-10-24T19:01:45.3290350Z Version: 20261021.278.1
+2026-10-24T19:01:45.3291211Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261021.278/images/windows/Windows2025-VS2026-Readme.md
+2026-10-24T19:01:45.3292106Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20261021.278
+2026-10-24T19:01:45.3292664Z ##[endgroup]
+2026-10-24T19:01:45.3293294Z ##[group]GITHUB_TOKEN Permissions
+2026-10-24T19:01:45.3294763Z Contents: write
+2026-10-24T19:01:45.3295134Z Metadata: read
+2026-10-24T19:01:45.3295461Z ##[endgroup]
+2026-10-24T19:01:45.3296813Z Secret source: Actions
+2026-10-24T19:01:45.3297325Z Cache mode: write
+2026-10-24T19:01:45.3297771Z Prepare workflow directory
+2026-10-24T19:01:45.3514530Z Prepare all required actions
+2026-10-24T19:01:45.3548176Z Getting action download info
+2026-10-24T19:01:45.6337593Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-24T19:01:45.7252846Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-10-24T19:01:45.8279145Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-10-24T19:01:46.1370024Z Complete job name: windows
+2026-10-24T19:01:46.2525977Z ##[group]Run actions/checkout@v4
+2026-10-24T19:01:46.2526731Z with:
+2026-10-24T19:01:46.2526981Z   repository: touwaeriol/prophey
+2026-10-24T19:01:46.2529414Z   token: ***
+2026-10-24T19:01:46.2529650Z   ssh-strict: true
+2026-10-24T19:01:46.2529892Z   ssh-user: git
+2026-10-24T19:01:46.2530140Z   persist-credentials: true
+2026-10-24T19:01:46.2530411Z   clean: true
+2026-10-24T19:01:46.2530662Z   sparse-checkout-cone-mode: true
+2026-10-24T19:01:46.2530953Z   fetch-depth: 1
+2026-10-24T19:01:46.2531190Z   fetch-tags: false
+2026-10-24T19:01:46.2531438Z   show-progress: true
+2026-10-24T19:01:46.2531686Z   lfs: false
+2026-10-24T19:01:46.2531919Z   submodules: false
+2026-10-24T19:01:46.2532178Z   set-safe-directory: true
+2026-10-24T19:01:46.2532565Z   allow-unsafe-pr-checkout: false
+2026-10-24T19:01:46.2533113Z ##[endgroup]
+2026-10-24T19:01:46.3543825Z Syncing repository: touwaeriol/prophey
+2026-10-24T19:01:46.3544994Z ##[group]Getting Git version info
+2026-10-24T19:01:46.3545392Z Working directory is 'D:\a\prophey\prophey'
+2026-10-24T19:01:46.4104449Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-24T19:01:46.8038898Z git version 2.56.0.windows.2
+2026-10-24T19:01:46.8072721Z ##[endgroup]
+2026-10-24T19:01:46.8086612Z Temporarily overriding HOME='D:\a\_temp\df1a6edf-11c5-41a5-9dac-56442dd78843' before making global git config changes
+2026-10-24T19:01:46.8093529Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-24T19:01:46.8094672Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\prophey\prophey
+2026-10-24T19:01:46.8707157Z Deleting the contents of 'D:\a\prophey\prophey'
+2026-10-24T19:01:46.8710828Z ##[group]Initializing the repository
+2026-10-24T19:01:46.8716321Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\prophey\prophey
+2026-10-24T19:01:46.9689691Z Initialized empty Git repository in D:/a/prophey/prophey/.git/
+2026-10-24T19:01:46.9724142Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/touwaeriol/prophey
+2026-10-24T19:01:47.0397256Z ##[endgroup]
+2026-10-24T19:01:47.0398263Z ##[group]Disabling automatic garbage collection
+2026-10-24T19:01:47.0402248Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-10-24T19:01:47.0644329Z ##[endgroup]
+2026-10-24T19:01:47.0645229Z ##[group]Setting up auth
+2026-10-24T19:01:47.0651920Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-24T19:01:47.0895859Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-10-24T19:01:48.6200898Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-24T19:01:48.6449678Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-10-24T19:01:49.0014571Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-24T19:01:49.0257031Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-10-24T19:01:49.4219943Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-10-24T19:01:49.4469248Z ##[endgroup]
+2026-10-24T19:01:49.4469644Z ##[group]Fetching the repository
+2026-10-24T19:01:49.4482616Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +ca659389da90e930fa7ed63969383d7cd78ba27d:refs/tags/v0.6.3
+2026-10-24T19:01:51.0582855Z From https://github.com/touwaeriol/prophey
+2026-10-24T19:01:51.0583942Z  * [new ref]         ca659389da90e930fa7ed63969383d7cd78ba27d -> v0.6.3
+2026-10-24T19:01:51.0637730Z ##[endgroup]
+2026-10-24T19:01:51.0638347Z ##[group]Determining the checkout info
+2026-10-24T19:01:51.0639954Z ##[endgroup]
+2026-10-24T19:01:51.0653000Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-10-24T19:01:51.1082891Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-10-24T19:01:51.1367093Z ##[group]Checking out the ref
+2026-10-24T19:01:51.1373182Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force refs/tags/v0.6.3
+2026-10-24T19:01:51.2151511Z Note: switching to 'refs/tags/v0.6.3'.
+2026-10-24T19:01:51.2151716Z 
+2026-10-24T19:01:51.2151834Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-24T19:01:51.2152284Z changes and commit them, and you can discard any commits you make in this
+2026-10-24T19:01:51.2152571Z state without impacting any branches by switching back to a branch.
+2026-10-24T19:01:51.2152731Z 
+2026-10-24T19:01:51.2152840Z If you want to create a new branch to retain commits you create, you may
+2026-10-24T19:01:51.2153143Z do so (now or later) by using -c with the switch command. Example:
+2026-10-24T19:01:51.2153323Z 
+2026-10-24T19:01:51.2153494Z   git switch -c <new-branch-name>
+2026-10-24T19:01:51.2153622Z 
+2026-10-24T19:01:51.2153682Z Or undo this operation with:
+2026-10-24T19:01:51.2153818Z 
+2026-10-24T19:01:51.2153924Z   git switch -
+2026-10-24T19:01:51.2154003Z 
+2026-10-24T19:01:51.2154119Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-24T19:01:51.2154293Z 
+2026-10-24T19:01:51.2154423Z HEAD is now at ca65938 Release 0.6.3: preserve questions when restoring another session
+2026-10-24T19:01:51.2208842Z ##[endgroup]
+2026-10-24T19:01:51.2564275Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-10-24T19:01:51.2794774Z ca659389da90e930fa7ed63969383d7cd78ba27d
+2026-10-24T19:01:51.3187512Z ##[group]Run actions/setup-node@v4
+2026-10-24T19:01:51.3187700Z with:
+2026-10-24T19:01:51.3187821Z   node-version: 24
+2026-10-24T19:01:51.3187927Z   cache: npm
+2026-10-24T19:01:51.3188033Z   always-auth: false
+2026-10-24T19:01:51.3188156Z   check-latest: false
+2026-10-24T19:01:51.3189700Z   token: ***
+2026-10-24T19:01:51.3189807Z ##[endgroup]
+2026-10-24T19:01:51.4366321Z Found in cache @ C:\hostedtoolcache\windows\node\24.22.1\x64
+2026-10-24T19:01:51.4371294Z (node:3296) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-24T19:01:51.4371680Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-24T19:01:51.4373250Z ##[group]Environment details
+2026-10-24T19:01:57.2701401Z node: v24.22.1
+2026-10-24T19:01:57.2701673Z npm: 11.19.1
+2026-10-24T19:01:57.2701826Z yarn: 1.22.22
+2026-10-24T19:01:57.3114741Z ##[endgroup]
+2026-10-24T19:01:57.3115369Z [command]C:\Windows\system32\cmd.exe /D /S /C "C:\hostedtoolcache\windows\node\24.22.1\x64\npm.cmd config get cache"
+2026-10-24T19:01:57.7610561Z C:\npm\cache
+2026-10-24T19:01:58.1240339Z npm cache is not found
+2026-10-24T19:01:58.1472978Z ##[group]Run npm ci
+2026-10-24T19:01:58.1473170Z [36;1mnpm ci[0m
+2026-10-24T19:01:58.2167326Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-24T19:01:58.2167538Z ##[endgroup]
+2026-10-24T19:02:01.6827621Z npm warn deprecated rimraf@2.6.3: Rimraf versions prior to v4 are no longer supported
+2026-10-24T19:02:02.8788792Z npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+2026-10-24T19:02:02.9545646Z npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+2026-10-24T19:02:03.8083016Z npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+2026-10-24T19:02:04.5506438Z npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+2026-10-24T19:02:05.1176900Z npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+2026-10-24T19:02:13.8068294Z 
+2026-10-24T19:02:13.8069478Z added 634 packages, and audited 637 packages in 15s
+2026-10-24T19:02:13.8069775Z 
+2026-10-24T19:02:13.8069944Z 177 packages are looking for funding
+2026-10-24T19:02:13.8071007Z   run `npm fund` for details
+2026-10-24T19:02:13.8103361Z 
+2026-10-24T19:02:13.8103638Z 2 vulnerabilities (1 moderate, 1 high)
+2026-10-24T19:02:13.8105871Z 
+2026-10-24T19:02:13.8106514Z To address all issues (including breaking changes), run:
+2026-10-24T19:02:13.8106828Z   npm audit fix --force
+2026-10-24T19:02:13.8106976Z 
+2026-10-24T19:02:13.8107075Z Run `npm audit` for details.
+2026-10-24T19:02:13.8116205Z npm warn install-scripts 4 packages have install scripts not yet covered by allowScripts:
+2026-10-24T19:02:13.8116850Z npm warn install-scripts   @google/genai@2.21.0 (preinstall: echo 'preinstall: no-op')
+2026-10-24T19:02:13.8117506Z npm warn install-scripts   electron-winstaller@5.4.0 (install: node ./script/select-7z-arch.js)
+2026-10-24T19:02:13.8118143Z npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+2026-10-24T19:02:13.8118682Z npm warn install-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+2026-10-24T19:02:13.8119076Z npm warn install-scripts
+2026-10-24T19:02:13.8119586Z npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+2026-10-24T19:02:16.9240615Z ##[group]Run npm test
+2026-10-24T19:02:16.9240845Z [36;1mnpm test[0m
+2026-10-24T19:02:16.9299381Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-24T19:02:16.9299583Z ##[endgroup]
+2026-10-24T19:02:17.4342133Z 
+2026-10-24T19:02:17.4342559Z > prophey@0.6.3 test
+2026-10-24T19:02:17.4342861Z > node --test tests/*.test.cjs
+2026-10-24T19:02:17.4343017Z 
+2026-10-24T19:02:17.6430527Z ✔ compaction: all default consumers use 90%, including invalid persisted ratios (0.6511ms)
+2026-10-24T19:02:17.6441528Z ✔ compaction: small explicit token thresholds survive persistence and restart (0.2131ms)
+2026-10-24T19:02:17.6442467Z ✔ compaction: rejects non-finite inputs before touching configuration (0.4213ms)
+2026-10-24T19:02:17.6443170Z ✔ commands: failed native discovery retains desktop commands but never forwards unknown input (0.4512ms)
+2026-10-24T19:02:17.6443871Z ✔ commands: model selection is explicit when providers share a model id (0.701ms)
+2026-10-24T19:02:17.6444514Z ✔ commands: busy engines cannot execute mutations (0.1363ms)
+2026-10-24T19:02:17.6445033Z ✔ commands: native execution and status use the supplied engine (0.2426ms)
+2026-10-24T19:02:17.6445674Z ✔ preload: all event subscriptions hide Electron events and clean up independently (4.0873ms)
+2026-10-24T19:02:18.2780243Z ✔ short commands return bounded text while preserving complete stdout/stderr on disk (640.9802ms)
+2026-10-24T19:02:18.9982453Z ✔ long commands yield, survive caller cancellation after detaching, and notify once (724.1386ms)
+2026-10-24T19:02:19.2834812Z ✖ foreground cancellation kills the process tree and explicit background tasks can be stopped (283.9157ms)
+2026-10-24T19:02:20.3699231Z ✔ timeouts and missing shells produce actionable failure status (1084.7527ms)
+2026-10-24T19:02:20.5761328Z ✔ byte cursors preserve UTF-8 across output pages (207.8403ms)
+2026-10-24T19:02:20.5764447Z ✔ subagent transcript pagination does not skip long messages and JSON stays bounded (2.1619ms)
+2026-10-24T19:02:20.5875476Z ✔ parses a real wham/usage payload into used / remaining windows (1.6053ms)
+2026-10-24T19:02:20.5876098Z ✔ orders windows shortest first and floors the remaining percentage (0.3819ms)
+2026-10-24T19:02:20.5876623Z ✔ reports "limit reached" and tolerates missing windows or credits (0.1773ms)
+2026-10-24T19:02:20.5877231Z ✔ labels windows and explains the tooltip with reset, source and the OpenAI caveat (0.9352ms)
+2026-10-24T19:02:20.5877800Z ✔ fetches plan usage with the Codex credential and caches the answer (20.3029ms)
+2026-10-24T19:02:20.5878326Z ✔ falls back to the Codex CLI login and explains a rejected credential (2.6092ms)
+2026-10-24T19:02:20.5878796Z ✔ tries the next credential when the first one is refused (1.1881ms)
+2026-10-24T19:02:20.5879840Z ✔ says why a ChatGPT sign-in alone cannot show a number (1.8358ms)
+2026-10-24T19:02:20.5881426Z ▲ [WARNING] Import "thinkingLevelsFor" will always be undefined because there is no matching export in "C:/Users/RUNNER~1/AppData/Local/Temp/prophey-engine-tests-5otRg5/provider.mjs" [import-is-undefined]
+2026-10-24T19:02:20.5882135Z 
+2026-10-24T19:02:20.5882220Z     <stdin>:251:35:
+2026-10-24T19:02:20.5882585Z       251 │     const levels = await providers.thinkingLevelsFor(model)
+2026-10-24T19:02:20.5883009Z           ╵                                    ~~~~~~~~~~~~~~~~~
+2026-10-24T19:02:20.5883197Z 
+2026-10-24T19:02:20.5883451Z ✔ pi: command catalogue matches capability ownership (1.0916ms)
+2026-10-24T19:02:20.5883944Z ✔ prophey: command catalogue matches capability ownership (0.1282ms)
+2026-10-24T19:02:20.5884433Z ✔ claude: command catalogue matches capability ownership (0.0622ms)
+2026-10-24T19:02:20.5884918Z ✔ codex: command catalogue matches capability ownership (0.0992ms)
+2026-10-24T19:02:20.5885459Z ✔ Codex: images are sent on the wire and turns wait for completion (4.2946ms)
+2026-10-24T19:02:20.5886050Z ✔ Codex: compaction acknowledgement does not mean compaction finished (0.8756ms)
+2026-10-24T19:02:20.5906963Z ✔ Codex: failure and stop settle the pending caller (1.2052ms)
+2026-10-24T19:02:20.5907632Z ✔ Codex: steering has an active-turn precondition (0.184ms)
+2026-10-24T19:02:20.5908122Z ✔ Codex: older servers restore history without pagination (0.3975ms)
+2026-10-24T19:02:20.5908606Z ✔ Claude: tool start and end share the real tool-use ID (0.5498ms)
+2026-10-24T19:02:20.5909136Z ✔ native auto-compaction cannot report a fake configurable success (0.2774ms)
+2026-10-24T19:02:20.5909780Z ✔ session store retains engine identity and opaque native references (28.9166ms)
+2026-10-24T19:02:20.5910549Z ✔ session engine changes preserve sidebar identity and do not change neighboring sessions (27.9985ms)
+2026-10-24T19:02:20.5911164Z ✔ JSON-RPC requests fail promptly when a process exits (41.0621ms)
+2026-10-24T19:02:20.5911624Z ✔ Claude: images use the native content format (0.6977ms)
+2026-10-24T19:02:20.5912199Z ✔ Claude: compact is a native command, and success requires the compact boundary (0.7857ms)
+2026-10-24T19:02:20.5912788Z ✔ Claude: native compaction failure releases busy state (0.2168ms)
+2026-10-24T19:02:20.5913288Z ✔ native restored histories preserve tool calls and results (0.2587ms)
+2026-10-24T19:02:20.5913887Z ✔ Prophey: stopping cancels the current request before accepting another turn (106.2255ms)
+2026-10-24T19:02:20.5914684Z ✔ Prophey: provider reload preserves an unsaved empty session and refreshes its model (0.9107ms)
+2026-10-24T19:02:20.5915411Z ✔ Claude: native tools and configured MCPs survive retired desktop tool settings (8.1495ms)
+2026-10-24T19:02:20.5916072Z ✔ Codex: the native question tool is switched on per launch, not in the user config (0.5568ms)
+2026-10-24T19:02:20.5916692Z ✔ Codex: request_user_input answers come back keyed by Codex question id (0.4169ms)
+2026-10-24T19:02:20.5917544Z ✔ Codex: permission requests and unknown methods keep their schema shapes (0.2025ms)
+2026-10-24T19:02:20.5918156Z ✔ Claude: AskUserQuestion is answered through the desktop queue (7.1609ms)
+2026-10-24T19:02:20.5918753Z ✔ the no-session-file fallback stops a running turn before switching (0.566ms)
+2026-10-24T19:02:20.5919336Z ✔ Prophey: Enter mid-run steers into the running turn instead of queueing (0.3743ms)
+2026-10-24T19:02:20.5919906Z [pi-rpc] spawning C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe [
+2026-10-24T19:02:20.5920415Z   'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\prophey-runtime-tests-BTZCA7\\unused-cli.js',
+2026-10-24T19:02:20.5920782Z   '--mode',
+2026-10-24T19:02:20.5920934Z   'rpc'
+2026-10-24T19:02:20.5921244Z ] cwd= C:\Users\RUNNER~1\AppData\Local\Temp\prophey-runtime-tests-BTZCA7
+2026-10-24T19:02:20.5921616Z [pi-rpc] stop requested, pid= 100
+2026-10-24T19:02:20.5921983Z [pi-rpc] spawning C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe [
+2026-10-24T19:02:20.5922499Z   'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\prophey-runtime-tests-BTZCA7\\unused-cli.js',
+2026-10-24T19:02:20.5922872Z   '--mode',
+2026-10-24T19:02:20.5923028Z   'rpc'
+2026-10-24T19:02:20.5923337Z ] cwd= C:\Users\RUNNER~1\AppData\Local\Temp\prophey-runtime-tests-BTZCA7
+2026-10-24T19:02:20.5923708Z [pi-rpc] connection failed: broken input
+2026-10-24T19:02:20.5924297Z ✔ JSONL framing accepts chunked objects and CRLF while ignoring malformed/non-object lines (1.4585ms)
+2026-10-24T19:02:20.5924972Z ✔ pi RPC isolates retired child output and preserves response/error protocol (3.6916ms)
+2026-10-24T19:02:20.5925570Z ✔ JSON-RPC keeps native requests, notifications and restarts separate (4.177ms)
+2026-10-24T19:02:20.5926056Z [pi-rpc] spawning C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe [
+2026-10-24T19:02:20.5926536Z   'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\prophey-runtime-tests-BTZCA7\\unused-cli.js',
+2026-10-24T19:02:20.5926896Z   '--mode',
+2026-10-24T19:02:20.5927053Z   'rpc'
+2026-10-24T19:02:20.5927353Z ] cwd= C:\Users\RUNNER~1\AppData\Local\Temp\prophey-runtime-tests-BTZCA7
+2026-10-24T19:02:20.5927708Z [pi-rpc] stop requested, pid= 100
+2026-10-24T19:02:20.5929795Z [pi-rpc] spawning C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe [
+2026-10-24T19:02:20.5930348Z   'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\prophey-runtime-tests-BTZCA7\\unused-cli.js',
+2026-10-24T19:02:20.5930728Z   '--mode',
+2026-10-24T19:02:20.5930888Z   'rpc'
+2026-10-24T19:02:20.5931233Z ] cwd= C:\Users\RUNNER~1\AppData\Local\Temp\prophey-runtime-tests-BTZCA7
+2026-10-24T19:02:20.5932446Z ▲ [WARNING] Import "thinkingLevelsFor" will always be undefined because there is no matching export in "C:/Users/RUNNER~1/AppData/Local/Temp/prophey-runtime-tests-BTZCA7/provider.mjs" [import-is-undefined]
+2026-10-24T19:02:20.5933148Z 
+2026-10-24T19:02:20.5933223Z     <stdin>:251:35:
+2026-10-24T19:02:20.5933604Z       251 │     const levels = await providers.thinkingLevelsFor(model)
+2026-10-24T19:02:20.5934033Z           ╵                                    ~~~~~~~~~~~~~~~~~
+2026-10-24T19:02:20.5934223Z 
+2026-10-24T19:02:20.5934553Z ✔ pi settle waiters remove both timed-out and completed subscriptions (9.3403ms)
+2026-10-24T19:02:20.5935461Z ✔ shared tool adapters preserve schemas, context and cancellation for every loader (17.7633ms)
+2026-10-24T19:02:20.5936214Z ✔ native permission confirmation denies by default and requires an explicit selection (12.9221ms)
+2026-10-24T19:02:20.5936923Z ✔ a restart inside an event handler discards the rest of the retired child chunk (2.3725ms)
+2026-10-24T19:02:20.5937711Z ✔ Prophey side chats propagate prompt errors and delete forks through transcript storage (45.4276ms)
+2026-10-24T19:02:20.5938567Z ✔ legacy history: preserve roles, images and tool pairs while dropping thoughts, signatures and system rules (1.6615ms)
+2026-10-24T19:02:20.5939428Z ✔ legacy history: tool-only and incomplete turns stay valid without inventing successful output (0.3174ms)
+2026-10-24T19:02:20.5940183Z ✔ legacy history: compaction summaries survive and duplicate tool IDs fail explicitly (0.3385ms)
+2026-10-24T19:02:20.5941036Z ✔ legacy history: mirrored Claude entries survive restart, deduplicate retries and discover subagent files (15.3239ms)
+2026-10-24T19:02:20.5941951Z ✔ legacy history: Codex reads existing legacy imports after reopen and forks without accepting new imports (5.1333ms)
+2026-10-24T19:02:20.5942818Z ✔ legacy history: stringified tool arguments become valid native objects without losing their value (0.2272ms)
+2026-10-24T19:02:20.5943625Z ✔ legacy history: deleting an imported Claude fork removes its mirrored history and subkeys (4.2985ms)
+2026-10-24T19:02:20.5944372Z ✔ legacy history: Claude tool-result images are retained without native source metadata (0.2004ms)
+2026-10-24T19:02:20.5945033Z ✔ image clipboard: valid PNG writes an image, never a URL or text (2.3868ms)
+2026-10-24T19:02:20.5945708Z ✔ image clipboard: invalid types, URLs and malformed PNG never reach the native decoder (1.1194ms)
+2026-10-24T19:02:20.5946381Z ✔ image clipboard: rejects oversized or zero-sized IHDR before decoding (0.9213ms)
+2026-10-24T19:02:20.5947036Z ✔ image clipboard: decode and OS write failures return errors, never success (1.4402ms)
+2026-10-24T19:02:20.5947707Z ✔ context correction is narrow, immutable and preserves dynamic provider behavior (1.1907ms)
+2026-10-24T19:02:20.5948444Z ✔ real SDK catalog, provider/model pickers and Prophey compaction share the corrected window (642.5024ms)
+2026-10-24T19:02:20.5949201Z ✔ explicit user model definitions/overrides win, including an intentional 272K limit (12.1226ms)
+2026-10-24T19:02:20.5949915Z ✔ desktop pi extension corrects real RPC state and model list with MCP disabled (609.1655ms)
+2026-10-24T19:02:20.5950625Z ✔ pi correction does not replace a user extension provider, credentials or custom models (525.1376ms)
+2026-10-24T19:02:20.5951565Z ✔ built-in engine switches OpenAI Responses / Anthropic / Chat Completions using real pi SDK adapters without rewriting history (1091.4456ms)
+2026-10-24T19:02:20.6464422Z ✔ Prophey workers use independent native loops and root contexts, without pi processes (216.9632ms)
+2026-10-24T19:02:20.6478913Z ✔ unsupported Prophey worker options fail explicitly rather than falling back to pi (1.8956ms)
+2026-10-24T19:02:20.6490124Z ✔ Prophey tool allowlists expose background controls only with bash and reject unsupported tools on every turn (1.4279ms)
+2026-10-24T19:02:20.7469043Z ✔ stopping an own worker cancels its engine and releases waiters (101.2258ms)
+2026-10-24T19:02:21.0197692Z ✔ interrupting an own worker only notifies for the replacement turn (272.5514ms)
+2026-10-24T19:02:21.0198590Z ✔ native engine subagent calls are rejected; managed calls preserve the parent engine and workspace (1.14ms)
+2026-10-24T19:02:21.2206306Z ✔ a Prophey background notice can wake the parent without becoming a user request in the UI (199.9583ms)
+2026-10-24T19:02:21.2207269Z ✔ Prophey continues beyond 16 tool rounds until a final response (0.7624ms)
+2026-10-24T19:02:21.3960285Z ✔ model choices and thinking levels are validated, sent to the SDK, and restored (176.3498ms)
+2026-10-24T19:02:21.4008179Z ✔ official DeepSeek defaults to high and preserves a saved explicit choice (4.7076ms)
+2026-10-24T19:02:22.3130094Z ✔ renderer: native string messages survive both streaming and session restore (1.1205ms)
+2026-10-24T19:02:22.3130878Z ✔ renderer: tool completion preserves arguments and survives final assistant snapshot (0.9197ms)
+2026-10-24T19:02:22.3131578Z ✔ renderer: tool ids update their original turn without mutating past snapshots (0.2367ms)
+2026-10-24T19:02:22.3132165Z ✔ renderer: user images and system notices retain their role (0.5276ms)
+2026-10-24T19:02:22.3132773Z ✔ renderer: file mentions replace paths containing s and preserve surrounding words (0.2236ms)
+2026-10-24T19:02:22.3133372Z ✔ renderer: project and pinned filters apply to folder grouping (0.6974ms)
+2026-10-24T19:02:22.3134086Z ✔ renderer: project and pinned filters apply to date grouping (0.1255ms)
+2026-10-24T19:02:22.3134593Z ✔ renderer: project and pinned filters apply to none grouping (0.1115ms)
+2026-10-24T19:02:22.3135277Z ✔ renderer: empty groups respect the active project and do not duplicate merged roots (1.0621ms)
+2026-10-24T19:02:22.3135884Z ✔ renderer: archive and text filters preserve total counts and do not mutate input (0.3692ms)
+2026-10-24T19:02:22.3136682Z ✔ renderer: project ownership does not absorb standalone sessions or another project sharing the same directory (7.6988ms)
+2026-10-24T19:02:22.3137418Z ✔ renderer: legacy single-directory projects stay under sessions and Windows path aliases merge (0.2659ms)
+2026-10-24T19:02:22.3137813Z ✔ renderer: switching sessions never reorders directories (0.5164ms)
+2026-10-24T19:02:22.3138168Z ✔ renderer: the open session leads its directory, name sort keeps its own order (0.1921ms)
+2026-10-24T19:02:22.3138538Z ✔ renderer: a brand-new directory sorts in without shifting the others (0.1808ms)
+2026-10-24T19:02:22.3138933Z ✔ renderer: pinning or archiving the oldest session does not make its directory look new (0.2948ms)
+2026-10-24T19:02:22.3139335Z ✔ renderer: a transcript that names another session is never accepted (0.2079ms)
+2026-10-24T19:02:22.3139740Z ✔ renderer: failed saves preserve draft, release busy and report result or transport error (0.3757ms)
+2026-10-24T19:02:22.3140266Z ✔ renderer: shared subagent state excludes settled and restored stopped runs (0.2417ms)
+2026-10-24T19:02:22.3140963Z ✔ built-in transcripts use the first user prompt instead of their UUID as a fallback title (5.8496ms)
+2026-10-24T19:02:22.3141389Z ✔ generated titles survive future updates and cannot overwrite manually renamed sessions (9.3792ms)
+2026-10-24T19:02:22.3141797Z ✔ atomic storage preserves call order, snapshots and cleans temporary files (35.2775ms)
+2026-10-24T19:02:22.3142183Z ✔ atomic storage recovers after failed replace and never truncates previous data (5.8241ms)
+2026-10-24T19:02:22.3142573Z ✔ concurrent JSON read-modify-write keeps every update and unknown fields (30.1938ms)
+2026-10-24T19:02:22.3142930Z ✔ cold session loads and concurrent upserts retain every session (37.2796ms)
+2026-10-24T19:02:22.3143682Z ✔ project mutations serialize whole transactions, and failure does not poison the store (36.7816ms)
+2026-10-24T19:02:22.3144040Z ✔ transcript reads and removals wait for earlier saves (4.4803ms)
+2026-10-24T19:02:22.3144389Z ✔ agent preset/exposure updates and MCP additions preserve concurrent changes (29.2036ms)
+2026-10-24T19:02:22.3144707Z [bridge] listening on http://127.0.0.1:60857
+2026-10-24T19:02:22.3145011Z ✔ provider settings and model endpoint updates merge independently (32.1664ms)
+2026-10-24T19:02:22.3145267Z [bridge] listening on http://127.0.0.1:60861
+2026-10-24T19:02:22.3145598Z ✔ bridge rejects bad credentials and removes a pending question on client disconnect (79.0666ms)
+2026-10-24T19:02:22.3145974Z ✔ subagent tools forward MCP cancellation to the bridge transport (2.0852ms)
+2026-10-24T19:02:22.3146333Z ✔ bridge: questions and completion events belong to their calling engine (36.1901ms)
+2026-10-24T19:02:22.3146728Z ✔ gateway: configuring another workspace cannot replace a live engine endpoint (1.0047ms)
+2026-10-24T19:02:22.3147277Z ✔ subagent API: delayed model resolution retains the caller workspace, model and parent (1.5466ms)
+2026-10-24T19:02:22.3147730Z ✔ web fetch validates redirects before requesting local addresses and limits loops (3.426ms)
+2026-10-24T19:02:22.3148109Z ✔ gateway ignores output and exits from old children after restarting (13.2883ms)
+2026-10-24T19:02:22.3148478Z ✔ project write failures leave the published cache unchanged and allow retry (25.9275ms)
+2026-10-24T19:02:22.3148844Z ✔ composer: Windows case and slash variants share one owner after restart (0.8592ms)
+2026-10-24T19:02:22.3149191Z ✔ composer: a draft typed in one session is not visible in another (0.1298ms)
+2026-10-24T19:02:22.3149538Z ✔ composer: patches only touch the session they name, updaters included (0.6231ms)
+2026-10-24T19:02:22.3149890Z ✔ composer: images and queue are dropped per session, never window-wide (0.1197ms)
+2026-10-24T19:02:22.3150251Z ✔ composer: the pre-session draft moves onto the session that claims it (0.1673ms)
+2026-10-24T19:02:22.3150592Z ✔ composer: persisted map round-trips and keeps empty entries out (0.2395ms)
+2026-10-24T19:02:22.3150937Z ✔ composer: malformed storage is ignored instead of breaking the window (0.2297ms)
+2026-10-24T19:02:22.3151244Z ✔ composer: pruning keeps the newest entries only (0.3096ms)
+2026-10-24T19:02:22.3151592Z ✔ collects write/edit tool paths per engine and resolves them against the workspace (1.2464ms)
+2026-10-24T19:02:22.3151971Z ✔ a file touched twice appears once, newest first, keeping the first kind (0.2303ms)
+2026-10-24T19:02:22.3152292Z ✔ reads Codex apply_patch blocks for every touched file (0.3368ms)
+2026-10-24T19:02:22.3152590Z ✔ ignores failed calls, other tools and unusable arguments (0.2708ms)
+2026-10-24T19:02:22.3152959Z ✔ resolveOutputPath keeps absolute paths and drops relative ones without a workspace (0.0955ms)
+2026-10-24T19:02:22.3153481Z ✔ recent directories keep latest ordering, deduplicate Windows aliases and preserve different paths with the same name (1.1413ms)
+2026-10-24T19:02:22.3154103Z ✔ session setup locks on real text, image or tool history, not headers and background notices (0.1969ms)
+2026-10-24T19:02:22.3154492Z ✔ a stalled provider stream times out and cancels the underlying request (21.4174ms)
+2026-10-24T19:02:22.3154863Z ✔ provider cancellation is prompt and an active long stream is not timed out (61.1945ms)
+2026-10-24T19:02:22.3155246Z ✔ streaming deltas and in-flight tool calls are visible before the turn settles (3.0617ms)
+2026-10-24T19:02:22.3155599Z ✔ a settled turn clears the live draft and keeps the transcript (0.945ms)
+2026-10-24T19:02:22.3155935Z ✔ stopping a run drops its live progress instead of leaving it streaming (0.5388ms)
+2026-10-24T19:02:22.3156228Z ✔ restored records carry no live progress (0.8157ms)
+2026-10-24T19:02:22.3156407Z ℹ tests 143
+2026-10-24T19:02:22.3156521Z ℹ suites 0
+2026-10-24T19:02:22.3156631Z ℹ pass 142
+2026-10-24T19:02:22.3156849Z ℹ fail 1
+2026-10-24T19:02:22.3157514Z ℹ cancelled 0
+2026-10-24T19:02:22.3157692Z ℹ skipped 0
+2026-10-24T19:02:22.3157873Z ℹ todo 0
+2026-10-24T19:02:22.3158076Z ℹ duration_ms 4837.761
+2026-10-24T19:02:22.3158159Z 
+2026-10-24T19:02:22.3158217Z ✖ failing tests:
+2026-10-24T19:02:22.3158288Z 
+2026-10-24T19:02:22.3158394Z test at tests\bash-tasks.test.cjs:59:1
+2026-10-24T19:02:22.3159062Z ✖ foreground cancellation kills the process tree and explicit background tasks can be stopped (283.9157ms)
+2026-10-24T19:02:22.3159567Z   AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+2026-10-24T19:02:22.3159843Z   
+2026-10-24T19:02:22.3160008Z     assert(body(result).includes('stopped'))
+2026-10-24T19:02:22.3160230Z   
+2026-10-24T19:02:22.3160570Z       at TestContext.<anonymous> (D:\a\prophey\prophey\tests\bash-tasks.test.cjs:66:3)
+2026-10-24T19:02:22.3161048Z       at async Test.run (node:internal/test_runner/test:1409:7)
+2026-10-24T19:02:22.3161514Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+2026-10-24T19:02:22.3161886Z     generatedMessage: true,
+2026-10-24T19:02:22.3162095Z     code: 'ERR_ASSERTION',
+2026-10-24T19:02:22.3162300Z     actual: false,
+2026-10-24T19:02:22.3162476Z     expected: true,
+2026-10-24T19:02:22.3162654Z     operator: '==',
+2026-10-24T19:02:22.3162827Z     diff: 'simple'
+2026-10-24T19:02:22.3162991Z   }
+2026-10-24T19:02:22.3785064Z ##[error]Process completed with exit code 1.
+2026-10-24T19:02:22.3986525Z Post job cleanup.
+2026-10-24T19:02:22.5000436Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-24T19:02:22.5238552Z git version 2.56.0.windows.2
+2026-10-24T19:02:22.5285078Z Temporarily overriding HOME='D:\a\_temp\9235e0fc-f653-46b5-8151-008581f580f6' before making global git config changes
+2026-10-24T19:02:22.5285853Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-24T19:02:22.5291008Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\prophey\prophey
+2026-10-24T19:02:22.5541065Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-24T19:02:22.5801487Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-10-24T19:02:22.9713846Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-24T19:02:22.9945696Z http.https://github.com/.extraheader
+2026-10-24T19:02:22.9981325Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2026-10-24T19:02:23.0233170Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-10-24T19:02:23.4272191Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-24T19:02:23.4513703Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-10-24T19:02:23.8375872Z Cleaning up orphan processes
+2026-10-24T19:02:23.8404080Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

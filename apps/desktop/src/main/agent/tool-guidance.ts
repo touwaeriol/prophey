@@ -14,6 +14,7 @@ import type { CoreTool } from './core-tools'
 
 const ASK_TOOL = 'ask_user_question'
 const START_SUBAGENT_TOOL = 'start_subagent'
+const WAIT_SUBAGENT_TOOL = 'wait_subagent'
 
 /**
  * Rules, not a section: they are about how a run uses whatever tools it has. The own engine sends
@@ -42,6 +43,20 @@ function rules(options: { grep?: string; find?: string; bash?: string }): string
   return lines.join('\n')
 }
 
+/**
+ * A parked turn is over: the tool handed control back, so nothing is gained by looping on it.
+ *
+ * The statement is only true for the own engine, which is the one that builds this prompt; pi
+ * degrades to "the turn ends anyway and the notice arrives later", which the same words describe.
+ */
+function parkGuidance(waits: string[]): string {
+  return [
+    `\`${waits.join('` / `')}\` 不会阻塞：目标还在跑时它们结束本回合，完成时把你唤醒并带上结果。`,
+    '所以看到「本回合到此结束」就不要再调一次、也不要轮询 `get_subagent`；有别的活就接着干，或者直接收尾。',
+    '真相不在工具里：开着后台任务时不要下「已完成」的结论，等通知或 `get_subagent` 说它结束了。'
+  ].join('\n')
+}
+
 /** `ask_user_question` shows the question in the window; there is no timeout and no retry. */
 function askGuidance(tool: string): string {
   return [
@@ -52,6 +67,22 @@ function askGuidance(tool: string): string {
     '读代码或按现有约定就能定的、显而易见的下一步、以及为单次工具调用求许可，都不要问。',
     '给 2–4 个具体选项，每个配一句说明；多个能同时成立时设 `multiSelect`。用户总能自己输入，选项代表性优先于穷举。' +
       '面板一次只显示一个问题，所以一次调用里把要问的问完。结果说用户取消时不要编造答案，问清楚再继续。'
+  ].join('\n')
+}
+
+/**
+ * The 「【附件】」 block: absolute paths the user pasted (WeChat, Explorer, the Desktop).
+ *
+ * Without this the model reads the block as prose and never opens the file, or worse, tries to
+ * resolve the path against the workspace and reports it missing.
+ */
+function attachmentGuidance(read: string): string {
+  return [
+    '消息里的「【附件】」块是本机文件路径（用户从聊天窗口、桌面、资源管理器里粘贴来的）。它们通常不在工作目录里，用 `' +
+      read +
+      '` 直接读绝对路径。',
+    '大文件先读一小段；pdf/docx/xlsx 这类不是纯文本，先确认读出来的是什么，必要的话用命令行工具转一下。',
+    '路径读不到（文件已被移走）就直说，不要猜相近的路径。'
   ].join('\n')
 }
 
@@ -134,6 +165,9 @@ export function toolGuidance(options: {
   const ask = named(ASK_TOOL)
   if (ask) blocks.push(askGuidance(ask))
 
+  const read = named('read_file')
+  if (read) blocks.push(attachmentGuidance(read))
+
   const search = named('web_search')
   const fetch = named('web_fetch')
   if (search && fetch) blocks.push(webGuidance(search, fetch))
@@ -166,6 +200,13 @@ export function toolGuidance(options: {
   // because a preset list without `start_subagent` is a dead end.
   const start = named(START_SUBAGENT_TOOL)
   if (options.agentsSection && start) blocks.push(options.agentsSection)
+
+  // Parking is stated once for every tool that can do it, and only when one is declared: the model
+  // otherwise keeps its old habit of waiting inside the call.
+  const waits = [named(WAIT_SUBAGENT_TOOL), named('read_bash_task')].filter(
+    (name): name is string => Boolean(name)
+  )
+  if (waits.length > 0) blocks.push(parkGuidance(waits))
 
   // One blank line between topics: the prompt is read as paragraphs, not as a wall of lines.
   return blocks.filter((block) => block !== '').join('\n\n')

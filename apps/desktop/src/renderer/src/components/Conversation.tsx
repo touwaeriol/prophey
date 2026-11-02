@@ -3,10 +3,12 @@ import type { SubagentView } from '@shared/types'
 import type { ChatItem, MessageImage, ToolCallView } from '../lib/messages'
 import { Markdown } from './Markdown'
 import { DraftImageStrip, ImageLightbox, MessageImages } from './ImageLightbox'
+import { AttachmentStrip } from './AttachmentStrip'
 import { ChevronIcon, PaperclipIcon, PencilIcon, SparkIcon, ToolIcon } from './Icons'
 import { SUBAGENT_STATUS_LABELS, isSubagentRunning } from '../lib/subagents'
 import { usageMeter } from '../lib/context-usage'
 import { imageSrc, type DraftImage } from '../lib/images'
+import { attachmentPrompt, attachmentsOf, baseName, removeAttachment, stripAttachments } from '../lib/attachments'
 import { useDraftImages } from '../hooks/useDraftImages'
 import { PendingSends, type PendingSend } from './PendingSends'
 
@@ -272,6 +274,8 @@ function UserBubble({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false)
   const [overflowing, setOverflowing] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
+  // The block is a transport format; the bubble reads as one line per file instead.
+  const { prose, files } = stripAttachments(text)
 
   const measure = (): void => {
     const node = ref.current
@@ -303,9 +307,28 @@ function UserBubble({ text }: { text: string }) {
         .filter(Boolean)
         .join(' ')}
     >
-      <div className="user-bubble-text" ref={ref}>
-        {text}
-      </div>
+      {prose !== '' && (
+        <div className="user-bubble-text" ref={ref}>
+          {prose}
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="message-files">
+          {files.map((file) => (
+            <button
+              key={file.path}
+              type="button"
+              className="message-file"
+              title={file.path}
+              onClick={() => void window.pi.revealPath(file.path)}
+            >
+              <span aria-hidden="true">📄</span>
+              {baseName(file.path)}
+              {file.size && <span className="message-file-size">{file.size}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       {overflowing && (
         <button className="user-bubble-toggle" onClick={() => setExpanded((value) => !value)}>
           {expanded ? '收起' : '展开全部'}
@@ -337,11 +360,15 @@ function UserMessage({
   const [preview, setPreview] = useState<DraftImage>()
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const { convertingVideos, dragging, handleFiles, removeImage, dropProps } = useDraftImages({
+  const { convertingVideos, dragging, handleFiles, pickFiles, removeImage, dropProps } = useDraftImages({
     images: attachments,
     onImagesChange: setAttachments,
+    text: draft ?? '',
+    onTextChange: setDraft,
     input: inputRef
   })
+  const editFiles = attachmentsOf(draft ?? '')
+  const removeEditFile = (path: string): void => setDraft(removeAttachment(draft ?? '', path))
   const editing = draft !== null
   // A bubble that has not settled (still being delivered) is not in the engine's history yet.
   const editable = index >= 0 && !item.pending
@@ -363,7 +390,7 @@ function UserMessage({
 
   const submit = (): void => {
     if (!canSend) return
-    const text = draft.trim()
+    const text = attachmentPrompt(draft.trim())
     const images = attachments
     close()
     onEditTurn(index, text, images)
@@ -377,6 +404,7 @@ function UserMessage({
       {editing ? (
         <div className={`user-edit ${dragging ? 'dragging' : ''}`} {...dropProps}>
           <DraftImageStrip images={attachments} onRemove={removeImage} onPreview={setPreview} />
+          <AttachmentStrip attachments={editFiles} onRemove={removeEditFile} />
           {convertingVideos > 0 && (
             <div className="video-converting" role="status">
               正在本地抽取关键帧…视频不会原样上传，暂不支持音轨识别
@@ -407,12 +435,12 @@ function UserMessage({
               ref={fileRef}
               className="attachment-input"
               type="file"
-              accept="image/*,video/mp4,video/webm,video/quicktime,video/ogg,.mkv"
+              accept="image/*,video/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.log"
               multiple
               tabIndex={-1}
               aria-hidden
               onChange={(event) => {
-                handleFiles(Array.from(event.target.files ?? []))
+                pickFiles(Array.from(event.target.files ?? []))
                 event.target.value = ''
               }}
             />

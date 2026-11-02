@@ -50,6 +50,7 @@ import { PANEL_OPEN_KEY, SIDEBAR_OPEN_KEY, SIDEBAR_WIDTH_KEY, readLayoutFlag, re
 import { updateStatusText } from './lib/updates'
 import { toChatItems, type ChatItem } from './lib/messages'
 import { videoFramePrompt } from './lib/video'
+import { attachmentPrompt } from './lib/attachments'
 import { messagesBelong } from './lib/session-messages'
 import {
   recallScroll,
@@ -754,6 +755,21 @@ export default function App(): React.JSX.Element {
         case 'compaction_end':
           // The summary is done; a later auto_retry or queue flush starts its own run.
           setRun((prev) => ({ ...prev, endedAt: prev.startedAt ? Date.now() : prev.endedAt }))
+          // History stays; only what the model reads was folded. Say so, or a new summary bubble in
+          // the middle of the conversation looks like a duplicate send.
+          if (record.message) setToast('上下文已压缩：摘要已插进对话（历史都保留，可以直接编辑摘要）')
+          break
+        case 'compaction_failed':
+          // Nothing was rewritten — the summary is only stored once it is worth storing.
+          setToast(`压缩没有完成，原对话继续（${String(record.error ?? '未知原因')}）`)
+          break
+        case 'tool_calls_repaired':
+          // A gateway that hands back the model's tool-call markup as text: it ran anyway.
+          setToast(
+            Number(record.count) > 0
+              ? `模型把工具调用写成了文本（网关没有转换），已解析出 ${String(record.count)} 个调用并执行`
+              : '模型返回了无法解析的工具调用标记（网关没有转换），已从回复中移除'
+          )
           break
         case 'tool_execution_start':
           setRun((prev) => ({ ...prev, runningTools: prev.runningTools + 1 }))
@@ -778,10 +794,6 @@ export default function App(): React.JSX.Element {
             })
             .catch(() => undefined)
           void loadSessions()
-          break
-        case 'compaction_end':
-          // The conversation just collapsed into one bubble; say why instead of letting it look lost.
-          if (record.message) setToast('上下文已压缩，摘要已放进对话（可以直接编辑）')
           break
         case 'auto_retry_start':
           // Name the reason: a provider that refuses the model outright is not a blip, and
@@ -1455,7 +1467,7 @@ export default function App(): React.JSX.Element {
     async (mode: 'send' | 'steer') => {
       const owner = activeComposerKey
       if (statusRef.current.switchingEngine || owner !== composerKeyRef.current) return
-      const text = draft.trim()
+      const text = attachmentPrompt(draft.trim())
       if (!text && draftImages.length === 0) return
       // The guess was for the message the user is about to send; it is spent either way.
       setSuggestion(null)

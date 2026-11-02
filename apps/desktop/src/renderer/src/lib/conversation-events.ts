@@ -8,6 +8,7 @@ import {
   type ChatItem,
   type ToolCallView
 } from './messages'
+import { hasToolCallMarkup, repairToolCallText } from '../../../shared/dsml-repair'
 
 interface ToolCallPayload {
   id?: string
@@ -128,9 +129,15 @@ function finishMessage(items: ChatItem[], message: MessagePayload, now: number):
   if (message.role !== 'assistant') return items
   return patchLastAssistant(items, (item) => {
     const calls = toolCallsFromBlocks(message.content)
+    // A gateway that streams the model's tool-call markup as text has already painted it. When the
+    // finished message carries no prose, the repaired text is what the bubble must show instead —
+    // including the empty result, so a call block that parsed into nothing leaves no markup behind.
+    const streamed = item.text ?? ''
+    const repaired = hasToolCallMarkup(streamed) ? repairToolCallText(streamed).text : streamed
+    const finalText = textFromBlocks(message.content) || repaired
     return {
       ...item,
-      text: textFromBlocks(message.content) || item.text,
+      text: finalText,
       thinking: thinkingFromBlocks(message.content) || item.thinking,
       toolCalls: calls.length > 0 ? calls.map((call) => {
         const existing = item.toolCalls.find((entry) => entry.id === call.id)
@@ -149,24 +156,29 @@ interface MessagePayload {
 }
 
 /**
- * Compaction rewrites the transcript into one summary message.
+ * Compaction folds the conversation the model sees into a summary message.
  *
  * Engines that compact in place (Claude / Codex) hand us nothing to project and keep their own
- * transcript, so their event is ignored; Prophey sends the summary it just stored, and the window
- * replaces everything before it — painting turns the model can no longer see is a lie either way.
+ * transcript, so their event is ignored. Prophey sends the summary it just stored: it is appended
+ * where the compaction happened rather than replacing the window. The user asked to still see the
+ * conversation they had (编辑摘要就回到那一点继续), and appending is also what keeps a summary that
+ * lands mid-turn from swallowing the message that arrived with it.
  */
-function compactionReplaced(items: ChatItem[], message: MessagePayload | undefined, now: number): ChatItem[] {
+function compactionSummary(items: ChatItem[], message: MessagePayload | undefined, now: number): ChatItem[] {
   if (message?.role !== 'user') return items
   const text = textFromBlocks(message.content)
   if (!text.trim()) return items
-  return [{
-    id: 'summary-' + now + '-' + items.length,
-    role: 'user',
-    text,
-    images: imagesFromBlocks(message.content),
-    toolCalls: [],
-    timestamp: typeof message.timestamp === 'number' ? message.timestamp : now
-  }]
+  return [
+    ...items,
+    {
+      id: 'summary-' + now + '-' + items.length,
+      role: 'user',
+      text,
+      images: imagesFromBlocks(message.content),
+      toolCalls: [],
+      timestamp: typeof message.timestamp === 'number' ? message.timestamp : now
+    }
+  ]
 }
 
 /** Pure event projection: IPC and run timing stay in App; chat transformations stay here. */
@@ -198,7 +210,7 @@ export function applyConversationEvent(items: ChatItem[], record: Record<string,
         durationMs: typeof record.durationMs === 'number' ? record.durationMs : undefined
       }))
     case 'compaction_end':
-      return compactionReplaced(items, record.message as MessagePayload | undefined, now)
+      return compactionSummary(items, record.message as MessagePayload | undefined, now)
     case 'agent_settled':
       // A bubble without its `message_end` is still a real message (the engine persisted it), so a
       // settle clears the dim rather than leaving it pending forever.

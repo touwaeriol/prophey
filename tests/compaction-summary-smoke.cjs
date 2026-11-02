@@ -1,8 +1,9 @@
 /**
- * Compaction rewrites the transcript into a single summary message. The window used to keep painting
- * the turns the model could no longer see, and the summary itself only appeared after a manual
- * reload. Now the `compaction_end` event replaces the conversation with the summary, painted as the
- * ordinary (editable) user message it is.
+ * Compaction folds what the model reads into a summary message; it does not take the conversation away.
+ *
+ * The user asked for exactly that after a session lost its history to a summary bubble: the window
+ * keeps every turn, the summary is inserted where the compaction happened (painted as the ordinary,
+ * editable user message it is), and only what the model receives starts at that summary.
  */
 const assert = require('node:assert/strict')
 
@@ -29,20 +30,25 @@ module.exports = async function compactionSummarySmoke(evaluate, until, window, 
     sessionKey: key
   })
   await until(() => shown('目标：修好登录界面'), 'summary painted')
-  // The transcript is the summary now; keeping the old turns on screen would show history the model
-  // can no longer see.
-  assert.equal(await shown('COMPACTED_TURN_SENTINEL'), false, 'compacted turns leave the window')
-  assert.equal(await evaluate('document.querySelectorAll(".message.user").length'), 1, 'one user bubble: the summary')
+  // The turns stay: the user still sees the conversation they had, the model just stops reading all
+  // of it. Replacing the window with the summary is what lost a real session's history.
+  assert.equal(await shown('COMPACTED_TURN_SENTINEL'), true, 'the conversation stays in the window')
+  assert.equal(await shown('先把登录界面改了'), true, 'the earlier user turn stays too')
+  assert.equal(await evaluate('document.querySelectorAll(".message.user").length'), 2, 'the summary is added after it')
   assert.equal(await evaluate('document.querySelectorAll(".message-images").length'), 0)
-  assert.match(await evaluate('document.querySelector(".user-bubble-text").textContent'), /【此前对话摘要】[\s\S]*目标：修好登录界面/)
+  // The summary is the last user bubble, in the same style as any other user turn.
+  assert.match(
+    await evaluate('[...document.querySelectorAll(".user-bubble-text")].at(-1).textContent'),
+    /【此前对话摘要】[\s\S]*目标：修好登录界面/
+  )
 
   // Same affordance as any other user turn: it can be rewritten, which resends from that point.
   assert.equal(
-    await evaluate('!!document.querySelector(".message.user .user-edit-open")'),
+    await evaluate('!![...document.querySelectorAll(".message.user")].at(-1).querySelector(".user-edit-open")'),
     true,
     'the summary can be edited'
   )
-  await evaluate('document.querySelector(".user-edit-open").click()')
+  await evaluate('[...document.querySelectorAll(".message.user")].at(-1).querySelector(".user-edit-open").click()')
   await until(() => evaluate('!!document.querySelector(".user-edit-input")'), 'editor opens on the summary')
   assert.equal(await evaluate('document.querySelector(".user-edit-input").value'), summary)
   assert.equal(
@@ -54,16 +60,32 @@ module.exports = async function compactionSummarySmoke(evaluate, until, window, 
     area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
   })()`)
   await until(() => evaluate('!document.querySelector(".user-edit-input")'), 'escape cancels the edit')
-  assert.equal(await evaluate('!!document.querySelector(".message.user")'), true, 'the summary survives the edit')
+  assert.equal(
+    await evaluate('[...document.querySelectorAll(".message.user")].at(-1).textContent.includes("【此前对话摘要】")'),
+    true,
+    'the summary survives the edit'
+  )
 
-  // Engines that compact privately (Claude / Codex) send no message; their event must not empty the
+  // Engines that compact privately (Claude / Codex) send no message; their event must not touch the
   // window, because their transcript is not ours to rewrite.
+  const before = await evaluate('document.querySelectorAll(".message").length')
   window.webContents.send('pi:event', { type: 'compaction_end', sessionKey: key })
   await new Promise((resolve) => setTimeout(resolve, 300))
+  assert.equal(await evaluate('document.querySelectorAll(".message").length'), before, 'a summary-less event adds nothing')
   assert.equal(await shown('目标：修好登录界面'), true, 'a summary-less compaction keeps the window')
+
+  // A failed compaction says so and changes nothing: the conversation continues as it was.
+  window.webContents.send('pi:event', {
+    type: 'compaction_failed',
+    error: '压缩被中断（模型只回了「[Request interrupted by user]」），原对话保持不变',
+    sessionKey: key
+  })
+  await until(() => shown('压缩没有完成'), 'the failure is named')
+  assert.equal(await evaluate('document.querySelectorAll(".message").length'), before, 'a failed compaction leaves the window alone')
+  assert.equal(await shown('COMPACTED_TURN_SENTINEL'), true)
 
   setSessionFixture(undefined)
   window.webContents.send('pi:status', idle)
   await until(async () => !(await shown('目标：修好登录界面')))
-  console.log('Compaction summary passed: replaces the transcript, is editable, and a summary-less compaction changes nothing')
+  console.log('Compaction summary passed: the history stays, the summary is inserted and editable, and a failed compaction changes nothing')
 }

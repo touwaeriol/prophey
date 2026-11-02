@@ -63,12 +63,19 @@ function rootListText(context) {
 }
 
 /** The root named by the caller, or the primary one. */
+/**
+ * A pasted attachment lives wherever the user copied it from, so an absolute path is taken as-is.
+ *
+ * `root` then only supplies the label in the result text; without this branch every file outside the
+ * workspace (a WeChat download folder, the Desktop) is unreadable however the caller spells it.
+ */
 function pickRoot(name, context) {
   const all = roots(context)
   if (all.length === 0) throw new Error('当前会话没有配置工作目录')
   if (name === undefined || name === null || String(name).trim() === '') {
     return all.find((root) => root.primary) ?? all[0]
   }
+  if (path.isAbsolute(String(name).trim())) return all.find((root) => root.primary) ?? all[0]
   const wanted = String(name).trim().toLowerCase()
   const byName = all.find((root) => root.name.toLowerCase() === wanted)
   if (byName) return byName
@@ -79,7 +86,10 @@ function pickRoot(name, context) {
 
 /** Resolve inside the root; anything that escapes it is refused rather than silently followed. */
 function inside(root, relative) {
-  const target = path.resolve(root.path, relative ?? '')
+  const raw = String(relative ?? '')
+  // Absolute means absolute: the root list is a convenience, not a sandbox.
+  if (path.isAbsolute(raw)) return path.resolve(raw)
+  const target = path.resolve(root.path, raw)
   const base = root.path.endsWith(path.sep) ? root.path : root.path + path.sep
   if (target !== root.path && !target.startsWith(base)) {
     throw new Error(`路径超出目录「${root.name}」的范围：${relative}`)
@@ -118,13 +128,13 @@ export const readFile = {
   title: 'Read a file in a workspace directory',
   description:
     'Read a text file from one of the workspace directories. `path` is relative to `root` (the ' +
-    'directory name listed in the workspace section of the prompt); omit `root` for the primary ' +
-    'directory. Paths that would escape the directory are refused.',
+    'directory name listed in the workspace section of the prompt) or an absolute path; omit `root` ' +
+    'for the primary directory. A relative path that would escape the directory is refused.',
   inputSchema: {
     type: 'object',
     properties: {
       root: { type: 'string', description: 'Directory name; omit for the primary directory.' },
-      path: { type: 'string', description: 'Path relative to the directory.' },
+      path: { type: 'string', description: 'Path relative to the directory, or absolute.' },
       offset: { type: 'number', description: 'First line to return (1-based).' },
       limit: { type: 'number', description: 'Maximum number of lines.' }
     },
@@ -270,13 +280,13 @@ export const writeFile = {
   title: 'Write a file in a workspace directory',
   description:
     'Create or overwrite a text file inside one workspace directory. `path` is relative to `root` ' +
-    '(omit `root` for the primary directory); parent directories are created. Anything that would ' +
-    'escape the directory is refused.',
+    'or absolute (a new directory is created either way), so a relative path that would escape the ' +
+    'directory is refused. Returns what happened (new / unchanged / overwritten) and the line count.',
   inputSchema: {
     type: 'object',
     properties: {
       root: { type: 'string', description: 'Directory name; omit for the primary directory.' },
-      path: { type: 'string', description: 'Path relative to the directory.' },
+      path: { type: 'string', description: 'Path relative to the directory, or absolute.' },
       content: { type: 'string', description: 'Full file content.' }
     },
     required: ['path', 'content'],
@@ -310,12 +320,12 @@ export const editFile = {
   description:
     'Apply exact-text replacements to a file inside one workspace directory. Each `oldText` must ' +
     'match the original file exactly and uniquely; edits are applied to the original content, not ' +
-    'incrementally. `path` is relative to `root`.',
+    'incrementally. `path` is relative to `root` or absolute.',
   inputSchema: {
     type: 'object',
     properties: {
       root: { type: 'string', description: 'Directory name; omit for the primary directory.' },
-      path: { type: 'string', description: 'Path relative to the directory.' },
+      path: { type: 'string', description: 'Path relative to the directory, or absolute.' },
       edits: {
         type: 'array',
         minItems: 1,

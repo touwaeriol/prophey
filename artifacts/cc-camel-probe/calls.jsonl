@@ -1,0 +1,9 @@
+{"at":"2026-10-24T14:20:00.638Z","kind":"request","method":"server/discover","id":"server-discover-probe-1"}
+{"at":"2026-10-24T14:20:00.646Z","kind":"request","method":"initialize","id":0}
+{"at":"2026-10-24T14:20:00.647Z","kind":"request","method":"notifications/initialized"}
+{"at":"2026-10-24T14:20:00.650Z","kind":"request","method":"tools/list","id":1}
+{"at":"2026-10-24T14:20:00.651Z","kind":"tools/list","names":["echoCamelCase","echo_snake"]}
+{"at":"2026-10-24T14:20:06.718Z","kind":"request","method":"tools/call","id":2}
+{"at":"2026-10-24T14:20:06.718Z","kind":"call","name":"echoCamelCase","arguments":{"userName":"张三","taskId":"T-42","dryRun":false,"maxResults":7,"targetDir":"D:/tmp/目标","filters":{"caseSensitive":true,"includeGlobs":["**/*.ts"]}},"keys":["userName","taskId","dryRun","maxResults","targetDir","filters"]}
+{"at":"2026-10-24T14:20:07.235Z","kind":"request","method":"tools/call","id":3}
+{"at":"2026-10-24T14:20:07.235Z","kind":"call","name":"echo_snake","arguments":{"user_name":"李四","task_id":"T-43","dry_run":true,"max_results":3},"keys":["user_name","task_id","dry_run","max_results"]}

@@ -42,6 +42,22 @@ test('rules mention the tools this engine really has', () => {
   assert.match(withoutGrep, /同一条回复里一起发/)
 })
 
+test('background work is described as parking, only while a waiting tool exists', () => {
+  const withWait = text({ tools: [tool('read_file'), tool('wait_subagent'), tool('read_bash_task')] })
+  assert.match(withWait, /wait_subagent/)
+  assert.match(withWait, /不会阻塞/)
+  assert.match(withWait, /不要轮询/)
+  // Without them the paragraph is a dead end.
+  assert.equal(text({ tools: [tool('read_file')] }).includes('不会阻塞'), false)
+})
+
+test('pasted attachments get their own guidance only while read_file exists', () => {
+  const withRead = text({ tools: [tool('read_file'), tool('grep_files')] })
+  assert.match(withRead, /【附件】/)
+  assert.match(withRead, /绝对路径/)
+  assert.equal(text({ tools: [tool('grep_files')] }).includes('【附件】'), false)
+})
+
 test('the question tool gets its own guidance only while declared', () => {
   const without = text({ tools: [tool('read_file')] })
   assert.equal(without.includes('ask_user_question'), false)

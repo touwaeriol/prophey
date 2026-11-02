@@ -16,6 +16,7 @@ import {
   StopIcon
 } from './Icons'
 import { DraftImageStrip, ImageLightbox } from './ImageLightbox'
+import { AttachmentStrip } from './AttachmentStrip'
 import { insertFileMention } from '../lib/composer'
 import { contextLabel } from '../lib/context-usage'
 import { useDismissable } from '../hooks/useDismissable'
@@ -129,13 +130,16 @@ export function Composer({
    * Attachments come from the shared hook so the composer and the history editor behave the same way
    * (same paste, same drop, same video frames). Only the text input itself is composer-specific.
    */
-  const { convertingVideos, dragging, handleFiles, removeImage, dropProps } = useDraftImages({
-    images,
-    onImagesChange,
-    onNotice,
-    disabled,
-    input: ref
-  })
+  const { convertingVideos, dragging, handleFiles, pickFiles, removeImage, attachments, removeAttachment, dropProps } =
+    useDraftImages({
+      images,
+      onImagesChange,
+      text: value,
+      onTextChange: onChange,
+      onNotice,
+      disabled,
+      input: ref
+    })
   const [modelOpen, setModelOpen] = useState(false)
   const [models, setModels] = useState<ModelOption[]>([])
   const [modelQuery, setModelQuery] = useState('')
@@ -476,6 +480,7 @@ export function Composer({
           </div>
         )}
         <DraftImageStrip images={images} onRemove={removeImage} onPreview={setPreview} />
+        <AttachmentStrip attachments={attachments} onRemove={removeAttachment} />
         {convertingVideos > 0 && (
           <div className="video-converting" role="status">
             正在本地抽取关键帧…视频不会原样上传，暂不支持音轨识别
@@ -509,11 +514,13 @@ export function Composer({
                 ? ''
                 : status.compacting
                   ? '正在压缩上下文，结束后会自动继续…'
-                  : streaming
-                    ? capabilities?.steer
-                      ? '继续输入，Enter 引导（等当前步骤结束）'
-                      : '继续输入，Enter 排队'
-                    : '发送消息…（可粘贴图片，或添加图片 / 视频）'
+                  : status.waiting
+                    ? `等待${status.waiting.kind === 'subagent' ? '子代理' : '后台命令'}结束，完成会自动继续；现在发消息就先接上`
+                    : streaming
+                      ? capabilities?.steer
+                        ? '继续输入，Enter 引导（等当前步骤结束）'
+                        : '继续输入，Enter 排队'
+                      : '发送消息…（可粘贴图片，或添加图片 / 视频）'
             }
             onChange={(event) => {
               const next = event.target.value
@@ -599,12 +606,12 @@ export function Composer({
               ref={fileRef}
               className="attachment-input"
               type="file"
-              accept="image/*,video/mp4,video/webm,video/quicktime,video/ogg,.mkv"
+              accept="image/*,video/*,.pdf,.txt,.md,.json,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.log"
               multiple
               tabIndex={-1}
               aria-hidden
               onChange={(event) => {
-                handleFiles(Array.from(event.target.files ?? []))
+                pickFiles(Array.from(event.target.files ?? []))
                 event.target.value = ''
               }}
             />

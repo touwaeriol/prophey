@@ -13,6 +13,7 @@ import type { TranscriptStore, StoredTranscript } from '../transcript-store'
 import { loadMcpTools } from './mcp-client'
 import { readProjectConventions } from './project-conventions'
 import { orderToolResults } from './transcript-order'
+import { hasToolCallMarkup, repairToolCallText } from '../../shared/dsml-repair'
 import { toolGuidance } from './tool-guidance'
 import {
   bridgeContext,
@@ -20,7 +21,8 @@ import {
   loadSubagentTools,
   loadWorkspaceTools,
   toolDeclarations,
-  type CoreTool
+  type CoreTool,
+  type DeferredResult
 } from './core-tools'
 import type { AgentEngine, AgentWorkspace, EngineCapabilities } from './engine'
 
@@ -48,6 +50,13 @@ export class PropheyEngine implements AgentEngine {
   private controller?: AbortController
   private notices: Array<{ text: string; wake: boolean; session?: string }> = []
   private noticeTimer?: ReturnType<typeof setTimeout>
+  /**
+   * Set while parked on background work: the round is over, but the work is not.
+   *
+   * A wait that blocks inside the tool call keeps the round alive and costs a model round trip on
+   * top; parking ends the round and lets whoever finishes wake it again.
+   */
+  private parked?: { kind: DeferredResult['kind']; keys: string[]; label?: string; since: number; timer?: ReturnType<typeof setTimeout> }
   private bashTasks = new Map<string | undefined, BashTasks>()
   private lastAbortAt = 0
   private levels: string[] = []
@@ -200,6 +209,9 @@ export class PropheyEngine implements AgentEngine {
     if (this.noticeTimer) clearTimeout(this.noticeTimer)
     this.noticeTimer = undefined
     this.controller?.abort()
+    // Without this an engine kept alive by a park would fire its failsafe wake after being stopped.
+    if (this.parked?.timer) clearTimeout(this.parked.timer)
+    this.parked = undefined
     for (const tasks of this.bashTasks.values()) tasks.dispose()
     this.bashTasks.clear()
     this.tools = undefined
@@ -342,7 +354,7 @@ export class PropheyEngine implements AgentEngine {
     const measured = this.usage
     const appended = measured
       ? estimateTokens(this.transcript.slice(measured.index))
-      : estimateTokens(this.transcript) + this.promptTokens
+      : estimateTokens(this.contextMessages()) + this.promptTokens
     return (measured?.tokens ?? 0) + appended + streaming
   }
 
@@ -437,7 +449,9 @@ export class PropheyEngine implements AgentEngine {
     this.setStatus({ contextUsage: usage })
   }
 
-  /** The transcript was replaced, so the measured prompt no longer describes it. */
+  /**
+   * The context was rewritten, so the measured prompt no longer describes it.
+   */
   private resetUsage(): void {
     this.usage = undefined
     this.live = undefined
@@ -479,17 +493,30 @@ export class PropheyEngine implements AgentEngine {
     this.setStatus({ autoCompactPercent: options.enabled ? this.autoCompact.percent : undefined })
   }
 
+  /** Where the compacted conversation starts: the newest summary, or the top of the transcript. */
+  private contextMessages(): Array<Record<string, unknown>> {
+    for (let at = this.transcript.length - 1; at >= 0; at -= 1) {
+      if (this.transcript[at].compaction === true) return this.transcript.slice(at)
+    }
+    return this.transcript
+  }
+
   /**
-   * Rewrite the context: the model summarizes the conversation, and the summary replaces it.
+   * Rewrite the context: the model summarizes the conversation, and the summary takes its place.
    *
-   * Same idea as pi's compaction — the transcript becomes a single "here is what happened" message,
-   * so the next turn starts with room to work instead of replaying everything.
+   * Same idea as pi's compaction — the request becomes "here is what happened" plus whatever came
+   * after, so the next turn starts with room to work instead of replaying everything. The transcript
+   * itself keeps every turn: the window still shows the conversation the user had (they asked for
+   * that), and only what the model receives is narrowed to the summary. A failed summary therefore
+   * costs nothing — the conversation is untouched until there is a summary worth storing.
    */
   async compact(instructions?: string): Promise<{ summary?: string }> {
     this.controller ??= new AbortController()
+    const signal = this.controller.signal
     const model = this.model ?? (await this.pickModel())
     if (!model) throw new Error('没有可用的模型，无法压缩')
-    if (this.transcript.length === 0) return {}
+    const context = this.contextMessages()
+    if (context.length === 0) return {}
     const runtime = await providers.getRuntime()
     this.setStatus({ compacting: true, activity: { label: '正在压缩上下文', since: Date.now() } })
     this.options.onEvent({ type: 'compaction_start', reason: 'manual' })
@@ -506,32 +533,25 @@ export class PropheyEngine implements AgentEngine {
 
 用户额外要求：${instructions.trim()}`
               : ''),
-          messages: orderToolResults(structuredClone(this.transcript)) as never
+          messages: orderToolResults(structuredClone(context)) as never
         },
-        { signal: this.controller.signal }
+        { signal }
       )) as unknown as Record<string, unknown>
-      const text = textOf(answer)
-      if (!text.trim()) {
-        // Say what the provider said. "The model returned nothing" hid a 503 model_not_found once
-        // already; an empty summary must not do it again.
-        throw new Error(
-          answer.stopReason === 'error' || answer.errorMessage
-            ? describeError(answer)
-            : '压缩没有返回内容。模型可能只回了思考过程，换一个模型或重试一次'
-        )
-      }
-      // The summary becomes the whole conversation, and it is an ordinary user message: the window
-      // paints it as one (and can edit it) instead of keeping history the model can no longer see.
+      const summary = summaryOf(answer, signal)
+      // The summary is an ordinary user message: the window paints it as one (and can edit it). It is
+      // appended where the compaction happened, so everything before stays readable and everything
+      // after keeps working — the request starts at the newest `compaction` marker, not at the top.
       const summaryMessage = {
         role: 'user',
-        content: `【此前对话摘要】\n${text.trim()}`,
-        timestamp: Date.now()
+        content: `【此前对话摘要】\n${summary}`,
+        timestamp: Date.now(),
+        compaction: true
       }
-      this.transcript = [summaryMessage]
+      this.transcript.push(summaryMessage)
       this.resetUsage()
       this.persist()
-      this.options.onEvent({ type: 'compaction_end', summary: text.trim(), message: summaryMessage })
-      return { summary: text.trim() }
+      this.options.onEvent({ type: 'compaction_end', summary, message: summaryMessage })
+      return { summary }
     } finally {
       this.setStatus({ compacting: false, activity: undefined })
       if (!this.isBusy) {
@@ -575,6 +595,8 @@ export class PropheyEngine implements AgentEngine {
   async switchSession(sessionPath: string): Promise<void> {
     const store = this.options.transcripts
     if (!store) this.unimplemented('切换会话')
+    // A park belongs to the session being left; its notice cannot be matched here any more.
+    this.wakeParked()
     const id = sessionPath
       .split(/[\\/]/)
       .pop()
@@ -609,8 +631,11 @@ export class PropheyEngine implements AgentEngine {
     this.lastAbortAt = Date.now()
     if (this.noticeTimer) clearTimeout(this.noticeTimer)
     this.noticeTimer = undefined
+    // A park survives: the round it belonged to is already over, and the work it waits for is still
+    // running — losing the park would leave the session looking idle while it is not.
+    // Background commands outlive the turn too: stopping the round of the moment must not kill work
+    // the user started in order to be woken up by it. `stopAll()` is the panel's own button.
     this.controller?.abort()
-    await this.bashTasks.get(this.sessionId)?.stopAll()
     await this.waitForSettle(15_000)
   }
 
@@ -801,9 +826,10 @@ export class PropheyEngine implements AgentEngine {
     return [
       '你是 Prophey 内置引擎的助手。',
       workspace,
-      '越界（`..`、绝对路径、符号出根）会被拒绝；目录清单已在上方列出，不必再调用 workspace_roots。',
+      '相对路径不能越出文件里指定的目录（`..`、符号出根会被拒绝）；绝对路径直接用。目录清单已在上方列出，不必再调用 workspace_roots。',
       '改文件前先读，改完再读回确认；命令用 run_bash 并指明目录。',
-      '长命令会后台执行，输出写入日志。完成通知不包含完整输出；需要时用 read_bash_task 的游标增量读取，避免重复读取日志。任务需要命令结果时，应等待完成后再下结论。',
+      '长命令会后台执行，输出写入日志。完成通知不包含完整输出；需要时用 read_bash_task 的游标增量读取，避免重复读取日志。',
+      '后台任务（命令、子代理）不需要等：工具会结束本回合，完成时唤醒你继续，所以不要轮询、也不要空等。有别的活就接着干。',
       // MCP servers cannot bring a prompt of their own, so how to use each declared tool is spelled
       // out here — gated on the tools this round really has.
       toolGuidance({ tools: this.tools ?? [], agentsSection: this.options.agentsSection?.() }),
@@ -817,11 +843,55 @@ export class PropheyEngine implements AgentEngine {
   }
 
   private queueNotice(text: string, wake: boolean, session?: string): void {
-    this.notices.push({ text: text.slice(0, 2000), wake: wake && Date.now() - this.lastAbortAt > 30_000, session })
+    // A parked round is waiting for exactly this, so it outranks the "the user just stopped us"
+    // guard: the stop was of a turn, not of the work.
+    const guard = Date.now() - this.lastAbortAt > 30_000 || this.parked !== undefined
+    this.notices.push({ text: text.slice(0, 2000), wake: wake && guard, session })
+    // The work we were parked on just reported in; the status must stop claiming we are waiting.
+    if (session === this.sessionId) this.wakeParked()
     if (session === this.sessionId && !this.busy()) {
       const shouldWake = this.drainNotices()
       if (shouldWake) this.scheduleNoticeTurn()
     }
+  }
+
+  /**
+   * Record that the round stopped on purpose to wait for background work, and arm the failsafe.
+   *
+   * The status carries it so the window can say 「等待 N 个后台任务」 instead of looking idle, and
+   * the session stays counted as running — an idle-looking session is exactly what invites a user
+   * to close the one thing that will wake it.
+   */
+  private park(deferred: DeferredResult): void {
+    this.wakeParked()
+    this.parked = {
+      kind: deferred.kind,
+      keys: [...deferred.keys],
+      label: deferred.label,
+      since: Date.now()
+    }
+    this.setStatus({ waiting: { kind: deferred.kind, label: deferred.label, since: this.parked.since } })
+    const timeout = deferred.timeoutMs ?? PARK_TIMEOUT_MS
+    if (timeout > 0) {
+      this.parked.timer = setTimeout(() => {
+        const task = this.parked
+        if (!task || this.busy()) return
+        // Nothing arrived in time: wake once so the model can look at the task itself rather than
+        // sit parked forever on work that may be wedged.
+        this.notify(
+          `${task.label ?? task.kind} 等了 ${formatDuration(timeout)} 仍没有结束，自己查一下（${task.keys.join(', ')}）。`,
+          true
+        )
+      }, timeout)
+    }
+  }
+
+  /** Forget the park (and its timer). Called when the awaited work reports in, or a turn starts. */
+  private wakeParked(): void {
+    if (!this.parked) return
+    if (this.parked.timer) clearTimeout(this.parked.timer)
+    this.parked = undefined
+    this.setStatus({ waiting: undefined })
   }
 
   private drainNotices(): boolean {
@@ -856,6 +926,8 @@ export class PropheyEngine implements AgentEngine {
     message: string,
     options: { behavior?: 'steer' | 'followUp'; images?: PromptImage[] } = {}
   ): Promise<PromptResult> {
+    // The user sent something themselves, so the park is answered either way.
+    if (!this.busy()) this.wakeParked()
     // A steer joins the run that is already going instead of waiting for it to settle.
     if (this.busy() && options.behavior === 'steer') return this.steer(message, options.images)
     return this.run(message, options)
@@ -966,6 +1038,8 @@ export class PropheyEngine implements AgentEngine {
     this.isBusy = true
     this.setStatus({ isStreaming: true, activity: { label: '正在准备模型与工具', since: Date.now() } })
     this.options.onEvent({ type: 'agent_start' })
+    // A park belongs to the round that armed it; this one either re-parks or clears it.
+    let parkedThisRound = false
     try {
       const user: Record<string, unknown> = {
         role: 'user',
@@ -986,9 +1060,20 @@ export class PropheyEngine implements AgentEngine {
       const tools = await this.toolSet()
       signal.throwIfAborted()
       // A task ends when the model finishes or the user stops it, never at a silent tool count.
+      let autoCompactTried = false
       for (;;) {
         signal.throwIfAborted()
-        if (this.shouldCompact()) await this.compact()
+        if (!autoCompactTried && this.shouldCompact()) {
+          autoCompactTried = true
+          try {
+            await this.compact()
+          } catch (error) {
+            // A summary that fails must not cost the turn. Nothing was rewritten (the summary is only
+            // stored once it is worth storing), so the model answers with what the conversation
+            // already holds, and the window says why the context stayed as it was.
+            this.options.onEvent({ type: 'compaction_failed', error: describeError(error) })
+          }
+        }
         this.drainNotices()
         this.steerPending = false
         const answer = await this.streamRoundWithRetry(runtime, model, tools)
@@ -1001,10 +1086,16 @@ export class PropheyEngine implements AgentEngine {
           break
         }
         this.toolBatchOpen = true
+        let deferred: DeferredResult | undefined
         try {
           for (const call of calls) {
             signal.throwIfAborted()
-            this.transcript.push(await this.runTool(call, tools))
+            const outcome = await this.runTool(call, tools)
+            this.transcript.push(outcome.message)
+            // One parked call parks the batch: the round has nothing left to do that a fresh turn
+            // after the wake would not do better. The remaining calls still ran, so their results
+            // are in the transcript and the order stays valid.
+            if (outcome.deferred) deferred ??= outcome.deferred
             this.persist()
             // A tool result goes into the next prompt, so the context really did grow.
             this.publishUsage(true)
@@ -1014,6 +1105,11 @@ export class PropheyEngine implements AgentEngine {
           // `orderToolResults`); from here a steer may enter the transcript again.
           this.toolBatchOpen = false
           this.flushSteers()
+        }
+        if (deferred) {
+          this.park(deferred)
+          parkedThisRound = true
+          break
         }
       }
       return { ok: true, disposition: 'started' }
@@ -1033,8 +1129,12 @@ export class PropheyEngine implements AgentEngine {
       // A steer that arrived after the loop decided to stop still has to be answered.
       const steered = this.steerPending
       this.steerPending = false
+      // A re-park is the outcome of this round, so it stays; anything else answers the old one.
+      if (!parkedThisRound) this.wakeParked()
       this.isBusy = false
       this.controller = undefined
+      // `activity` is cleared but `waiting` may remain: "parked" has to be distinguishable from
+      // "idle", otherwise the window looks done while work is still running.
       this.setStatus({ isStreaming: false, compacting: false, activity: undefined })
       this.options.onEvent({ type: 'agent_end' })
       this.options.onEvent({ type: 'agent_settled' })
@@ -1123,7 +1223,8 @@ export class PropheyEngine implements AgentEngine {
         // translate this copy into the target model's protocol at request time. The call/result
         // grouping is repaired first: one user turn persisted inside a tool batch (an old steer, a
         // notice) would otherwise make every request fail with 400 until the session is dropped.
-        messages: orderToolResults(structuredClone(this.transcript)) as never,
+        // The request carries the newest summary onward, not the turns it already summarizes.
+        messages: orderToolResults(structuredClone(this.contextMessages())) as never,
         tools: declarations
       },
       { ...fastOptions, signal,
@@ -1180,6 +1281,42 @@ export class PropheyEngine implements AgentEngine {
       }
       return { ok: false, error: '模型返回了空回复，请检查模型配置后重试' }
     }
+    // A gateway that does not translate the model's tool-call markup leaves it in the reply text: no
+    // tool would run and the window would paint `<｜｜DSML｜｜ invoke …>` as prose. Parse it back into
+    // calls, and keep the markup out of the transcript either way.
+    const repaired = repairToolCallText(textOf(partial))
+    if (repaired.calls.length > 0 && toolCallsOf(partial).length === 0) {
+      const kept = (Array.isArray(partial.content) ? (partial.content as unknown[]) : []).filter(
+        (block) => (block as { type?: string } | undefined)?.type !== 'text'
+      )
+      const stamp = Date.now().toString(36)
+      partial = {
+        ...partial,
+        stopReason: 'toolUse',
+        content: [
+          ...kept,
+          ...(repaired.text ? [{ type: 'text', text: repaired.text }] : []),
+          ...repaired.calls.map((call, index) => ({
+            type: 'toolCall',
+            id: `call_dsml_${stamp}_${index}`,
+            name: call.name,
+            arguments: call.arguments
+          }))
+        ]
+      }
+      this.options.onEvent({ type: 'tool_calls_repaired', count: repaired.calls.length })
+    } else if (repaired.calls.length === 0 && hasToolCallMarkup(textOf(partial))) {
+      // Markup with nothing parseable (a truncated stream, a format from the future): still leave it
+      // out of the window, and say that the call the model meant did not survive.
+      const kept = (Array.isArray(partial.content) ? (partial.content as unknown[]) : []).filter(
+        (block) => (block as { type?: string } | undefined)?.type !== 'text'
+      )
+      partial = {
+        ...partial,
+        content: [...kept, ...(repaired.text ? [{ type: 'text', text: repaired.text }] : [])]
+      }
+      this.options.onEvent({ type: 'tool_calls_repaired', count: 0 })
+    }
     const message = { ...partial, api: partial.api ?? model.api,
       provider: partial.provider ?? model.provider, model: partial.model ?? model.id }
     this.transcript.push(message)
@@ -1198,7 +1335,7 @@ export class PropheyEngine implements AgentEngine {
   private async runTool(
     call: { id: string; name: string; arguments: Record<string, unknown> },
     tools: CoreTool[]
-  ): Promise<Record<string, unknown>> {
+  ): Promise<{ message: Record<string, unknown>; deferred?: DeferredResult }> {
     const tool = tools.find((entry) => entry.name === call.name)
     const started = Date.now()
     this.setStatus({ activity: { label: `正在执行 ${call.name}`, since: started } })
@@ -1208,7 +1345,7 @@ export class PropheyEngine implements AgentEngine {
       toolName: call.name,
       args: call.arguments
     })
-    let result: { content: Array<{ type: string; text?: string }>; isError?: boolean }
+    let result: { content: Array<{ type: string; text?: string }>; isError?: boolean; deferred?: DeferredResult }
     if (!tool) {
       result = { content: [{ type: 'text', text: `未知工具：${call.name}` }], isError: true }
     } else {
@@ -1226,12 +1363,15 @@ export class PropheyEngine implements AgentEngine {
       durationMs: Date.now() - started
     })
     return {
-      role: 'toolResult',
-      toolCallId: call.id,
-      toolName: call.name,
-      content: result.content,
-      isError: Boolean(result.isError),
-      timestamp: Date.now()
+      message: {
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: result.content,
+        isError: Boolean(result.isError),
+        timestamp: Date.now()
+      },
+      deferred: result.isError ? undefined : result.deferred
     }
   }
 
@@ -1305,6 +1445,19 @@ function textOf(message: Record<string, unknown>): string {
 /** Backoff before each retry; length is the retry budget. */
 const RETRY_DELAYS_MS = [1500, 4000, 9000]
 
+/**
+ * How long a park may last without any news before the engine wakes the model anyway.
+ *
+ * A parked session is an idle session to the user; ten minutes of silence looks broken even when
+ * the subagent is genuinely working, and the model is the one that can decide to give up.
+ */
+const PARK_TIMEOUT_MS = 10 * 60_000
+
+function formatDuration(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)} 秒`
+  return `${Math.round(ms / 60_000)} 分钟`
+}
+
 /** Only transient failures are worth another attempt: a bad key or a bad request never recovers. */
 function isRetryable(message: string): boolean {
   return /rate.?limit|429|overloaded|timeout|timed out|ECONNRESET|socket hang up|network|fetch failed|502|503|504|stream (ended|closed)|premature close/i.test(
@@ -1371,6 +1524,35 @@ function describeError(error: unknown): string {
     return code ? `模型调用失败（${code}）` : '模型调用失败（服务商没有给出原因）'
   }
   return String(error)
+}
+
+/**
+ * The summary the model produced, or a refusal.
+ *
+ * A compaction request can come back as an interruption instead of a summary: aborting the request
+ * yields an assistant message whose text is "[Request interrupted by user]". That is non-empty, so
+ * it passed the old "nothing returned" check and was stored as the entire conversation — session
+ * `s_99a5d7e6` lost its history to exactly that line. Anything that is not a plausible summary is
+ * rejected here, before the transcript is touched, so a failed compaction costs nothing.
+ */
+const MIN_SUMMARY_CHARS = 8
+const INTERRUPTED_SUMMARY = /^\[?\s*(request|user|generation|message)?\s*(was\s+)?interrupt(ed|ion)\b.*$/i
+
+function summaryOf(answer: Record<string, unknown>, signal: AbortSignal): string {
+  const text = textOf(answer).trim()
+  if (signal.aborted || answer.stopReason === 'aborted') {
+    throw new Error('压缩被中断，原对话保持不变')
+  }
+  // Say what the provider said: an empty answer hid a 503 model_not_found once already.
+  if (answer.stopReason === 'error' || answer.errorMessage) throw new Error(describeError(answer))
+  if (!text) throw new Error('压缩没有返回内容。模型可能只回了思考过程，换一个模型或重试一次')
+  if (INTERRUPTED_SUMMARY.test(text)) {
+    throw new Error(`压缩被中断（模型只回了「${text}」），原对话保持不变`)
+  }
+  if (text.length < MIN_SUMMARY_CHARS) {
+    throw new Error(`压缩返回的内容太短（${text.length} 字），不像摘要，原对话保持不变`)
+  }
+  return text
 }
 
 /** Tool calls the model asked for in one assistant message. */

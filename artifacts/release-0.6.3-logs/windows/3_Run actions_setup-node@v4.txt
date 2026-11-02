@@ -1,0 +1,19 @@
+﻿2026-10-24T19:01:51.3187494Z ##[group]Run actions/setup-node@v4
+2026-10-24T19:01:51.3187697Z with:
+2026-10-24T19:01:51.3187819Z   node-version: 24
+2026-10-24T19:01:51.3187926Z   cache: npm
+2026-10-24T19:01:51.3188031Z   always-auth: false
+2026-10-24T19:01:51.3188155Z   check-latest: false
+2026-10-24T19:01:51.3189699Z   token: ***
+2026-10-24T19:01:51.3189806Z ##[endgroup]
+2026-10-24T19:01:51.4366294Z Found in cache @ C:\hostedtoolcache\windows\node\24.22.1\x64
+2026-10-24T19:01:51.4371290Z (node:3296) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-24T19:01:51.4371677Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-24T19:01:51.4373248Z ##[group]Environment details
+2026-10-24T19:01:57.2701351Z node: v24.22.1
+2026-10-24T19:01:57.2701671Z npm: 11.19.1
+2026-10-24T19:01:57.2701823Z yarn: 1.22.22
+2026-10-24T19:01:57.3114698Z ##[endgroup]
+2026-10-24T19:01:57.3115110Z [command]C:\Windows\system32\cmd.exe /D /S /C "C:\hostedtoolcache\windows\node\24.22.1\x64\npm.cmd config get cache"
+2026-10-24T19:01:57.7610514Z C:\npm\cache
+2026-10-24T19:01:58.1240309Z npm cache is not found

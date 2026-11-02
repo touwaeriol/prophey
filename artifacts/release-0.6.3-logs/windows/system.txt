@@ -1,0 +1,8 @@
+2026-10-24T19:01:42.3570000Z Evaluating windows.if
+2026-10-24T19:01:42.3570000Z Evaluating: success()
+2026-10-24T19:01:42.3570000Z Result: true
+2026-10-24T19:01:42.3580000Z Requested labels: windows-latest
+2026-10-24T19:01:42.3580000Z Job defined at: touwaeriol/prophey/.github/workflows/release.yml@refs/tags/v0.6.3
+2026-10-24T19:01:42.3580000Z Waiting for a runner to pick up this job...
+2026-10-24T19:01:42.7770000Z Job is waiting for a hosted runner to come online.
+2026-10-24T19:01:42.7760000Z Job is about to start running on the hosted runner: GitHub Actions 1000016242

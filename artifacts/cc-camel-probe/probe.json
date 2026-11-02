@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "probe": {
+      "command": "D:/app/nodejs/node.exe",
+      "args": ["D:/projects/js/pi-mcps/artifacts/cc-camel-probe/server.mjs"]
+    }
+  }
+}

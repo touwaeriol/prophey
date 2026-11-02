@@ -5379,6 +5379,83 @@ body.resizing-sidebar * {
   margin-bottom: 8px;
 }
 
+/* Pasted files: one row each, name is the content, size is the only metadata worth showing. */
+.draft-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.draft-file,
+.message-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 4px 6px 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.draft-file-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.draft-file-name:hover {
+  text-decoration: underline;
+}
+
+.draft-file-size,
+.message-file-size {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.draft-file-remove {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--border-soft);
+  color: var(--text);
+  line-height: 1;
+}
+
+/* The same row inside a sent bubble, where it is a link rather than an attachment. */
+.message-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.message-file {
+  font: inherit;
+  cursor: pointer;
+  padding: 3px 8px;
+}
+
+.message-file:hover {
+  border-color: var(--accent);
+}
+
 .draft-image {
   position: relative;
   display: flex;

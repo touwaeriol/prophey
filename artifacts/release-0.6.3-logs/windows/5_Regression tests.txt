@@ -1,0 +1,216 @@
+﻿2026-10-24T19:02:16.9240592Z ##[group]Run npm test
+2026-10-24T19:02:16.9240843Z [36;1mnpm test[0m
+2026-10-24T19:02:16.9299370Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-24T19:02:16.9299580Z ##[endgroup]
+2026-10-24T19:02:17.4342099Z 
+2026-10-24T19:02:17.4342555Z > prophey@0.6.3 test
+2026-10-24T19:02:17.4342859Z > node --test tests/*.test.cjs
+2026-10-24T19:02:17.4343014Z 
+2026-10-24T19:02:17.6430479Z ✔ compaction: all default consumers use 90%, including invalid persisted ratios (0.6511ms)
+2026-10-24T19:02:17.6441512Z ✔ compaction: small explicit token thresholds survive persistence and restart (0.2131ms)
+2026-10-24T19:02:17.6442463Z ✔ compaction: rejects non-finite inputs before touching configuration (0.4213ms)
+2026-10-24T19:02:17.6443168Z ✔ commands: failed native discovery retains desktop commands but never forwards unknown input (0.4512ms)
+2026-10-24T19:02:17.6443868Z ✔ commands: model selection is explicit when providers share a model id (0.701ms)
+2026-10-24T19:02:17.6444434Z ✔ commands: busy engines cannot execute mutations (0.1363ms)
+2026-10-24T19:02:17.6445030Z ✔ commands: native execution and status use the supplied engine (0.2426ms)
+2026-10-24T19:02:17.6445672Z ✔ preload: all event subscriptions hide Electron events and clean up independently (4.0873ms)
+2026-10-24T19:02:18.2780189Z ✔ short commands return bounded text while preserving complete stdout/stderr on disk (640.9802ms)
+2026-10-24T19:02:18.9982402Z ✔ long commands yield, survive caller cancellation after detaching, and notify once (724.1386ms)
+2026-10-24T19:02:19.2834751Z ✖ foreground cancellation kills the process tree and explicit background tasks can be stopped (283.9157ms)
+2026-10-24T19:02:20.3699178Z ✔ timeouts and missing shells produce actionable failure status (1084.7527ms)
+2026-10-24T19:02:20.5761280Z ✔ byte cursors preserve UTF-8 across output pages (207.8403ms)
+2026-10-24T19:02:20.5764387Z ✔ subagent transcript pagination does not skip long messages and JSON stays bounded (2.1619ms)
+2026-10-24T19:02:20.5875455Z ✔ parses a real wham/usage payload into used / remaining windows (1.6053ms)
+2026-10-24T19:02:20.5876095Z ✔ orders windows shortest first and floors the remaining percentage (0.3819ms)
+2026-10-24T19:02:20.5876621Z ✔ reports "limit reached" and tolerates missing windows or credits (0.1773ms)
+2026-10-24T19:02:20.5877229Z ✔ labels windows and explains the tooltip with reset, source and the OpenAI caveat (0.9352ms)
+2026-10-24T19:02:20.5877798Z ✔ fetches plan usage with the Codex credential and caches the answer (20.3029ms)
+2026-10-24T19:02:20.5878324Z ✔ falls back to the Codex CLI login and explains a rejected credential (2.6092ms)
+2026-10-24T19:02:20.5878794Z ✔ tries the next credential when the first one is refused (1.1881ms)
+2026-10-24T19:02:20.5879836Z ✔ says why a ChatGPT sign-in alone cannot show a number (1.8358ms)
+2026-10-24T19:02:20.5881377Z ▲ [WARNING] Import "thinkingLevelsFor" will always be undefined because there is no matching export in "C:/Users/RUNNER~1/AppData/Local/Temp/prophey-engine-tests-5otRg5/provider.mjs" [import-is-undefined]
+2026-10-24T19:02:20.5882130Z 
+2026-10-24T19:02:20.5882216Z     <stdin>:251:35:
+2026-10-24T19:02:20.5882581Z       251 │     const levels = await providers.thinkingLevelsFor(model)
+2026-10-24T19:02:20.5883006Z           ╵                                    ~~~~~~~~~~~~~~~~~
+2026-10-24T19:02:20.5883195Z 
+2026-10-24T19:02:20.5883449Z ✔ pi: command catalogue matches capability ownership (1.0916ms)
+2026-10-24T19:02:20.5883942Z ✔ prophey: command catalogue matches capability ownership (0.1282ms)
+2026-10-24T19:02:20.5884431Z ✔ claude: command catalogue matches capability ownership (0.0622ms)
+2026-10-24T19:02:20.5884916Z ✔ codex: command catalogue matches capability ownership (0.0992ms)
+2026-10-24T19:02:20.5885456Z ✔ Codex: images are sent on the wire and turns wait for completion (4.2946ms)
+2026-10-24T19:02:20.5886048Z ✔ Codex: compaction acknowledgement does not mean compaction finished (0.8756ms)
+2026-10-24T19:02:20.5886908Z ✔ Codex: failure and stop settle the pending caller (1.2052ms)
+2026-10-24T19:02:20.5907628Z ✔ Codex: steering has an active-turn precondition (0.184ms)
+2026-10-24T19:02:20.5908119Z ✔ Codex: older servers restore history without pagination (0.3975ms)
+2026-10-24T19:02:20.5908604Z ✔ Claude: tool start and end share the real tool-use ID (0.5498ms)
+2026-10-24T19:02:20.5909133Z ✔ native auto-compaction cannot report a fake configurable success (0.2774ms)
+2026-10-24T19:02:20.5909778Z ✔ session store retains engine identity and opaque native references (28.9166ms)
+2026-10-24T19:02:20.5910545Z ✔ session engine changes preserve sidebar identity and do not change neighboring sessions (27.9985ms)
+2026-10-24T19:02:20.5911162Z ✔ JSON-RPC requests fail promptly when a process exits (41.0621ms)
+2026-10-24T19:02:20.5911622Z ✔ Claude: images use the native content format (0.6977ms)
+2026-10-24T19:02:20.5912196Z ✔ Claude: compact is a native command, and success requires the compact boundary (0.7857ms)
+2026-10-24T19:02:20.5912778Z ✔ Claude: native compaction failure releases busy state (0.2168ms)
+2026-10-24T19:02:20.5913285Z ✔ native restored histories preserve tool calls and results (0.2587ms)
+2026-10-24T19:02:20.5913885Z ✔ Prophey: stopping cancels the current request before accepting another turn (106.2255ms)
+2026-10-24T19:02:20.5914681Z ✔ Prophey: provider reload preserves an unsaved empty session and refreshes its model (0.9107ms)
+2026-10-24T19:02:20.5915409Z ✔ Claude: native tools and configured MCPs survive retired desktop tool settings (8.1495ms)
+2026-10-24T19:02:20.5916070Z ✔ Codex: the native question tool is switched on per launch, not in the user config (0.5568ms)
+2026-10-24T19:02:20.5916690Z ✔ Codex: request_user_input answers come back keyed by Codex question id (0.4169ms)
+2026-10-24T19:02:20.5917541Z ✔ Codex: permission requests and unknown methods keep their schema shapes (0.2025ms)
+2026-10-24T19:02:20.5918154Z ✔ Claude: AskUserQuestion is answered through the desktop queue (7.1609ms)
+2026-10-24T19:02:20.5918743Z ✔ the no-session-file fallback stops a running turn before switching (0.566ms)
+2026-10-24T19:02:20.5919334Z ✔ Prophey: Enter mid-run steers into the running turn instead of queueing (0.3743ms)
+2026-10-24T19:02:20.5919900Z [pi-rpc] spawning C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe [
+2026-10-24T19:02:20.5920413Z   'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\prophey-runtime-tests-BTZCA7\\unused-cli.js',
+2026-10-24T19:02:20.5920780Z   '--mode',
+2026-10-24T19:02:20.5920932Z   'rpc'
+2026-10-24T19:02:20.5921242Z ] cwd= C:\Users\RUNNER~1\AppData\Local\Temp\prophey-runtime-tests-BTZCA7
+2026-10-24T19:02:20.5921614Z [pi-rpc] stop requested, pid= 100
+2026-10-24T19:02:20.5921981Z [pi-rpc] spawning C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe [
+2026-10-24T19:02:20.5922492Z   'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\prophey-runtime-tests-BTZCA7\\unused-cli.js',
+2026-10-24T19:02:20.5922870Z   '--mode',
+2026-10-24T19:02:20.5923027Z   'rpc'
+2026-10-24T19:02:20.5923329Z ] cwd= C:\Users\RUNNER~1\AppData\Local\Temp\prophey-runtime-tests-BTZCA7
+2026-10-24T19:02:20.5923706Z [pi-rpc] connection failed: broken input
+2026-10-24T19:02:20.5924293Z ✔ JSONL framing accepts chunked objects and CRLF while ignoring malformed/non-object lines (1.4585ms)
+2026-10-24T19:02:20.5924969Z ✔ pi RPC isolates retired child output and preserves response/error protocol (3.6916ms)
+2026-10-24T19:02:20.5925568Z ✔ JSON-RPC keeps native requests, notifications and restarts separate (4.177ms)
+2026-10-24T19:02:20.5926054Z [pi-rpc] spawning C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe [
+2026-10-24T19:02:20.5926534Z   'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\prophey-runtime-tests-BTZCA7\\unused-cli.js',
+2026-10-24T19:02:20.5926894Z   '--mode',
+2026-10-24T19:02:20.5927052Z   'rpc'
+2026-10-24T19:02:20.5927351Z ] cwd= C:\Users\RUNNER~1\AppData\Local\Temp\prophey-runtime-tests-BTZCA7
+2026-10-24T19:02:20.5927706Z [pi-rpc] stop requested, pid= 100
+2026-10-24T19:02:20.5929363Z [pi-rpc] spawning C:\hostedtoolcache\windows\node\24.22.1\x64\node.exe [
+2026-10-24T19:02:20.5930345Z   'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\prophey-runtime-tests-BTZCA7\\unused-cli.js',
+2026-10-24T19:02:20.5930725Z   '--mode',
+2026-10-24T19:02:20.5930886Z   'rpc'
+2026-10-24T19:02:20.5931231Z ] cwd= C:\Users\RUNNER~1\AppData\Local\Temp\prophey-runtime-tests-BTZCA7
+2026-10-24T19:02:20.5932442Z ▲ [WARNING] Import "thinkingLevelsFor" will always be undefined because there is no matching export in "C:/Users/RUNNER~1/AppData/Local/Temp/prophey-runtime-tests-BTZCA7/provider.mjs" [import-is-undefined]
+2026-10-24T19:02:20.5933144Z 
+2026-10-24T19:02:20.5933220Z     <stdin>:251:35:
+2026-10-24T19:02:20.5933601Z       251 │     const levels = await providers.thinkingLevelsFor(model)
+2026-10-24T19:02:20.5934030Z           ╵                                    ~~~~~~~~~~~~~~~~~
+2026-10-24T19:02:20.5934221Z 
+2026-10-24T19:02:20.5934549Z ✔ pi settle waiters remove both timed-out and completed subscriptions (9.3403ms)
+2026-10-24T19:02:20.5935451Z ✔ shared tool adapters preserve schemas, context and cancellation for every loader (17.7633ms)
+2026-10-24T19:02:20.5936211Z ✔ native permission confirmation denies by default and requires an explicit selection (12.9221ms)
+2026-10-24T19:02:20.5936920Z ✔ a restart inside an event handler discards the rest of the retired child chunk (2.3725ms)
+2026-10-24T19:02:20.5937708Z ✔ Prophey side chats propagate prompt errors and delete forks through transcript storage (45.4276ms)
+2026-10-24T19:02:20.5938564Z ✔ legacy history: preserve roles, images and tool pairs while dropping thoughts, signatures and system rules (1.6615ms)
+2026-10-24T19:02:20.5939425Z ✔ legacy history: tool-only and incomplete turns stay valid without inventing successful output (0.3174ms)
+2026-10-24T19:02:20.5940181Z ✔ legacy history: compaction summaries survive and duplicate tool IDs fail explicitly (0.3385ms)
+2026-10-24T19:02:20.5941023Z ✔ legacy history: mirrored Claude entries survive restart, deduplicate retries and discover subagent files (15.3239ms)
+2026-10-24T19:02:20.5941949Z ✔ legacy history: Codex reads existing legacy imports after reopen and forks without accepting new imports (5.1333ms)
+2026-10-24T19:02:20.5942816Z ✔ legacy history: stringified tool arguments become valid native objects without losing their value (0.2272ms)
+2026-10-24T19:02:20.5943623Z ✔ legacy history: deleting an imported Claude fork removes its mirrored history and subkeys (4.2985ms)
+2026-10-24T19:02:20.5944370Z ✔ legacy history: Claude tool-result images are retained without native source metadata (0.2004ms)
+2026-10-24T19:02:20.5945031Z ✔ image clipboard: valid PNG writes an image, never a URL or text (2.3868ms)
+2026-10-24T19:02:20.5945706Z ✔ image clipboard: invalid types, URLs and malformed PNG never reach the native decoder (1.1194ms)
+2026-10-24T19:02:20.5946379Z ✔ image clipboard: rejects oversized or zero-sized IHDR before decoding (0.9213ms)
+2026-10-24T19:02:20.5947027Z ✔ image clipboard: decode and OS write failures return errors, never success (1.4402ms)
+2026-10-24T19:02:20.5947705Z ✔ context correction is narrow, immutable and preserves dynamic provider behavior (1.1907ms)
+2026-10-24T19:02:20.5948441Z ✔ real SDK catalog, provider/model pickers and Prophey compaction share the corrected window (642.5024ms)
+2026-10-24T19:02:20.5949196Z ✔ explicit user model definitions/overrides win, including an intentional 272K limit (12.1226ms)
+2026-10-24T19:02:20.5949913Z ✔ desktop pi extension corrects real RPC state and model list with MCP disabled (609.1655ms)
+2026-10-24T19:02:20.5950623Z ✔ pi correction does not replace a user extension provider, credentials or custom models (525.1376ms)
+2026-10-24T19:02:20.5951556Z ✔ built-in engine switches OpenAI Responses / Anthropic / Chat Completions using real pi SDK adapters without rewriting history (1091.4456ms)
+2026-10-24T19:02:20.6464368Z ✔ Prophey workers use independent native loops and root contexts, without pi processes (216.9632ms)
+2026-10-24T19:02:20.6478625Z ✔ unsupported Prophey worker options fail explicitly rather than falling back to pi (1.8956ms)
+2026-10-24T19:02:20.6490107Z ✔ Prophey tool allowlists expose background controls only with bash and reject unsupported tools on every turn (1.4279ms)
+2026-10-24T19:02:20.7468993Z ✔ stopping an own worker cancels its engine and releases waiters (101.2258ms)
+2026-10-24T19:02:21.0197637Z ✔ interrupting an own worker only notifies for the replacement turn (272.5514ms)
+2026-10-24T19:02:21.0198587Z ✔ native engine subagent calls are rejected; managed calls preserve the parent engine and workspace (1.14ms)
+2026-10-24T19:02:21.2206245Z ✔ a Prophey background notice can wake the parent without becoming a user request in the UI (199.9583ms)
+2026-10-24T19:02:21.2207265Z ✔ Prophey continues beyond 16 tool rounds until a final response (0.7624ms)
+2026-10-24T19:02:21.3960260Z ✔ model choices and thinking levels are validated, sent to the SDK, and restored (176.3498ms)
+2026-10-24T19:02:21.4008138Z ✔ official DeepSeek defaults to high and preserves a saved explicit choice (4.7076ms)
+2026-10-24T19:02:22.3130044Z ✔ renderer: native string messages survive both streaming and session restore (1.1205ms)
+2026-10-24T19:02:22.3130875Z ✔ renderer: tool completion preserves arguments and survives final assistant snapshot (0.9197ms)
+2026-10-24T19:02:22.3131565Z ✔ renderer: tool ids update their original turn without mutating past snapshots (0.2367ms)
+2026-10-24T19:02:22.3132163Z ✔ renderer: user images and system notices retain their role (0.5276ms)
+2026-10-24T19:02:22.3132771Z ✔ renderer: file mentions replace paths containing s and preserve surrounding words (0.2236ms)
+2026-10-24T19:02:22.3133370Z ✔ renderer: project and pinned filters apply to folder grouping (0.6974ms)
+2026-10-24T19:02:22.3134084Z ✔ renderer: project and pinned filters apply to date grouping (0.1255ms)
+2026-10-24T19:02:22.3134591Z ✔ renderer: project and pinned filters apply to none grouping (0.1115ms)
+2026-10-24T19:02:22.3135256Z ✔ renderer: empty groups respect the active project and do not duplicate merged roots (1.0621ms)
+2026-10-24T19:02:22.3135882Z ✔ renderer: archive and text filters preserve total counts and do not mutate input (0.3692ms)
+2026-10-24T19:02:22.3136679Z ✔ renderer: project ownership does not absorb standalone sessions or another project sharing the same directory (7.6988ms)
+2026-10-24T19:02:22.3137416Z ✔ renderer: legacy single-directory projects stay under sessions and Windows path aliases merge (0.2659ms)
+2026-10-24T19:02:22.3137811Z ✔ renderer: switching sessions never reorders directories (0.5164ms)
+2026-10-24T19:02:22.3138166Z ✔ renderer: the open session leads its directory, name sort keeps its own order (0.1921ms)
+2026-10-24T19:02:22.3138536Z ✔ renderer: a brand-new directory sorts in without shifting the others (0.1808ms)
+2026-10-24T19:02:22.3138931Z ✔ renderer: pinning or archiving the oldest session does not make its directory look new (0.2948ms)
+2026-10-24T19:02:22.3139327Z ✔ renderer: a transcript that names another session is never accepted (0.2079ms)
+2026-10-24T19:02:22.3139735Z ✔ renderer: failed saves preserve draft, release busy and report result or transport error (0.3757ms)
+2026-10-24T19:02:22.3140264Z ✔ renderer: shared subagent state excludes settled and restored stopped runs (0.2417ms)
+2026-10-24T19:02:22.3140961Z ✔ built-in transcripts use the first user prompt instead of their UUID as a fallback title (5.8496ms)
+2026-10-24T19:02:22.3141388Z ✔ generated titles survive future updates and cannot overwrite manually renamed sessions (9.3792ms)
+2026-10-24T19:02:22.3141791Z ✔ atomic storage preserves call order, snapshots and cleans temporary files (35.2775ms)
+2026-10-24T19:02:22.3142182Z ✔ atomic storage recovers after failed replace and never truncates previous data (5.8241ms)
+2026-10-24T19:02:22.3142572Z ✔ concurrent JSON read-modify-write keeps every update and unknown fields (30.1938ms)
+2026-10-24T19:02:22.3142929Z ✔ cold session loads and concurrent upserts retain every session (37.2796ms)
+2026-10-24T19:02:22.3143555Z ✔ project mutations serialize whole transactions, and failure does not poison the store (36.7816ms)
+2026-10-24T19:02:22.3144034Z ✔ transcript reads and removals wait for earlier saves (4.4803ms)
+2026-10-24T19:02:22.3144387Z ✔ agent preset/exposure updates and MCP additions preserve concurrent changes (29.2036ms)
+2026-10-24T19:02:22.3144705Z [bridge] listening on http://127.0.0.1:60857
+2026-10-24T19:02:22.3145009Z ✔ provider settings and model endpoint updates merge independently (32.1664ms)
+2026-10-24T19:02:22.3145265Z [bridge] listening on http://127.0.0.1:60861
+2026-10-24T19:02:22.3145596Z ✔ bridge rejects bad credentials and removes a pending question on client disconnect (79.0666ms)
+2026-10-24T19:02:22.3145972Z ✔ subagent tools forward MCP cancellation to the bridge transport (2.0852ms)
+2026-10-24T19:02:22.3146332Z ✔ bridge: questions and completion events belong to their calling engine (36.1901ms)
+2026-10-24T19:02:22.3146720Z ✔ gateway: configuring another workspace cannot replace a live engine endpoint (1.0047ms)
+2026-10-24T19:02:22.3147275Z ✔ subagent API: delayed model resolution retains the caller workspace, model and parent (1.5466ms)
+2026-10-24T19:02:22.3147728Z ✔ web fetch validates redirects before requesting local addresses and limits loops (3.426ms)
+2026-10-24T19:02:22.3148108Z ✔ gateway ignores output and exits from old children after restarting (13.2883ms)
+2026-10-24T19:02:22.3148477Z ✔ project write failures leave the published cache unchanged and allow retry (25.9275ms)
+2026-10-24T19:02:22.3148843Z ✔ composer: Windows case and slash variants share one owner after restart (0.8592ms)
+2026-10-24T19:02:22.3149190Z ✔ composer: a draft typed in one session is not visible in another (0.1298ms)
+2026-10-24T19:02:22.3149537Z ✔ composer: patches only touch the session they name, updaters included (0.6231ms)
+2026-10-24T19:02:22.3149889Z ✔ composer: images and queue are dropped per session, never window-wide (0.1197ms)
+2026-10-24T19:02:22.3150244Z ✔ composer: the pre-session draft moves onto the session that claims it (0.1673ms)
+2026-10-24T19:02:22.3150590Z ✔ composer: persisted map round-trips and keeps empty entries out (0.2395ms)
+2026-10-24T19:02:22.3150935Z ✔ composer: malformed storage is ignored instead of breaking the window (0.2297ms)
+2026-10-24T19:02:22.3151242Z ✔ composer: pruning keeps the newest entries only (0.3096ms)
+2026-10-24T19:02:22.3151591Z ✔ collects write/edit tool paths per engine and resolves them against the workspace (1.2464ms)
+2026-10-24T19:02:22.3151970Z ✔ a file touched twice appears once, newest first, keeping the first kind (0.2303ms)
+2026-10-24T19:02:22.3152290Z ✔ reads Codex apply_patch blocks for every touched file (0.3368ms)
+2026-10-24T19:02:22.3152588Z ✔ ignores failed calls, other tools and unusable arguments (0.2708ms)
+2026-10-24T19:02:22.3152958Z ✔ resolveOutputPath keeps absolute paths and drops relative ones without a workspace (0.0955ms)
+2026-10-24T19:02:22.3153473Z ✔ recent directories keep latest ordering, deduplicate Windows aliases and preserve different paths with the same name (1.1413ms)
+2026-10-24T19:02:22.3154101Z ✔ session setup locks on real text, image or tool history, not headers and background notices (0.1969ms)
+2026-10-24T19:02:22.3154491Z ✔ a stalled provider stream times out and cancels the underlying request (21.4174ms)
+2026-10-24T19:02:22.3154862Z ✔ provider cancellation is prompt and an active long stream is not timed out (61.1945ms)
+2026-10-24T19:02:22.3155244Z ✔ streaming deltas and in-flight tool calls are visible before the turn settles (3.0617ms)
+2026-10-24T19:02:22.3155597Z ✔ a settled turn clears the live draft and keeps the transcript (0.945ms)
+2026-10-24T19:02:22.3155934Z ✔ stopping a run drops its live progress instead of leaving it streaming (0.5388ms)
+2026-10-24T19:02:22.3156226Z ✔ restored records carry no live progress (0.8157ms)
+2026-10-24T19:02:22.3156404Z ℹ tests 143
+2026-10-24T19:02:22.3156520Z ℹ suites 0
+2026-10-24T19:02:22.3156630Z ℹ pass 142
+2026-10-24T19:02:22.3156848Z ℹ fail 1
+2026-10-24T19:02:22.3156961Z ℹ cancelled 0
+2026-10-24T19:02:22.3157689Z ℹ skipped 0
+2026-10-24T19:02:22.3157871Z ℹ todo 0
+2026-10-24T19:02:22.3158074Z ℹ duration_ms 4837.761
+2026-10-24T19:02:22.3158156Z 
+2026-10-24T19:02:22.3158215Z ✖ failing tests:
+2026-10-24T19:02:22.3158286Z 
+2026-10-24T19:02:22.3158392Z test at tests\bash-tasks.test.cjs:59:1
+2026-10-24T19:02:22.3159057Z ✖ foreground cancellation kills the process tree and explicit background tasks can be stopped (283.9157ms)
+2026-10-24T19:02:22.3159565Z   AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+2026-10-24T19:02:22.3159840Z   
+2026-10-24T19:02:22.3160006Z     assert(body(result).includes('stopped'))
+2026-10-24T19:02:22.3160222Z   
+2026-10-24T19:02:22.3160568Z       at TestContext.<anonymous> (D:\a\prophey\prophey\tests\bash-tasks.test.cjs:66:3)
+2026-10-24T19:02:22.3161046Z       at async Test.run (node:internal/test_runner/test:1409:7)
+2026-10-24T19:02:22.3161505Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+2026-10-24T19:02:22.3161884Z     generatedMessage: true,
+2026-10-24T19:02:22.3162093Z     code: 'ERR_ASSERTION',
+2026-10-24T19:02:22.3162298Z     actual: false,
+2026-10-24T19:02:22.3162475Z     expected: true,
+2026-10-24T19:02:22.3162652Z     operator: '==',
+2026-10-24T19:02:22.3162825Z     diff: 'simple'
+2026-10-24T19:02:22.3162989Z   }
+2026-10-24T19:02:22.3785034Z ##[error]Process completed with exit code 1.

@@ -285,9 +285,10 @@ export const startSubagent = {
     'Start a subagent using the current engine (Prophey or pi) for a task in this project. It starts ' +
     'blind, so the task must carry the goal, paths and constraints. Worth it for self-contained ' +
     'work that would flood this context (broad exploration, long test loops, a diff review) and ' +
-    'for independent slices run in parallel; do small or context-dependent work yourself. With ' +
-    '`mode: "sync"` it returns the final answer when it finishes; with `mode: "background"` it ' +
-    'returns immediately, and a notice is appended to this session when it finishes (`notify`). ' +
+    'for independent slices run in parallel; do small or context-dependent work yourself. Sync mode ' +
+    'does not block either: it waits a short grace, then hands the round back and the answer arrives ' +
+    'in the completion notice. `mode: "background"` returns immediately, and the same notice reports ' +
+    'it when it finishes (`notify`). ' +
     'Every parameter overrides the preset: model, tools, mode, cwd.',
   inputSchema: {
     type: 'object',
@@ -311,7 +312,12 @@ export const startSubagent = {
       cwd: { type: 'string', description: 'Working directory, defaults to this session directory.' },
       label: { type: 'string', description: 'Short name for the subagent.' },
       timeoutMs: { type: 'integer', description: 'Hard runtime limit. Default 15 minutes.' },
-      waitMs: { type: 'integer', description: 'How long sync mode waits. Default 120s, max 300s.' },
+      waitMs: {
+        type: 'integer',
+        description:
+          'Grace period before a sync start parks the turn. Default 1500 so a trivial task still ends ' +
+          'inline; the round is handed back rather than blocked for the whole run.'
+      },
       notify: {
         type: 'string',
         enum: ['wake', 'queue', 'none'],
@@ -343,6 +349,9 @@ export const startSubagent = {
       if (args?.[key] !== undefined) payload[key] = args[key]
     }
     if (Array.isArray(args?.tools)) payload.tools = args.tools
+    // A sync run parks after a short grace instead of holding the round open: the completion notice
+    // brings the answer back, which is also the only way a long task stays interruptible.
+    if (args?.mode === 'sync' && args?.waitMs === undefined) payload.waitMs = 1500
     const response = await callBridge(context, 'POST', '/subagents', payload)
     if (args?.format === 'json') {
       return text(JSON.stringify({ subagent: compactRecord(response.subagent), resolved: response.resolved }, null, 2))
@@ -353,8 +362,15 @@ export const startSubagent = {
     lines.push(`tools: ${record.tools?.length ? record.tools.join(', ') : '全量'}`)
     lines.push(`cwd: ${record.cwd}`)
     if (response.timedOut) {
-      lines.push('', `仍在运行：已等 ${duration(args?.waitMs ?? DEFAULT_WAIT_MS)}，用 wait_subagent 或 get_subagent 继续。`)
-      return text(lines.join('\n'))
+      lines.push(
+        '',
+        `仍在运行：本回合到此结束，它结束时你会被唤醒（不必轮询，也不必紧接着调 wait_subagent）。`,
+        `想现在看进度就调 get_subagent（id ${record.id}）。`
+      )
+      return {
+        ...text(lines.join('\n')),
+        deferred: { kind: 'subagent', keys: [record.id], label: `等待子代理 ${record.id}` }
+      }
     }
     if (record.mode === 'background') {
       const notify = record.notify ?? 'wake'
@@ -473,13 +489,14 @@ export const listSubagents = {
 export const waitSubagent = {  name: 'wait_subagent',
   title: 'Wait for a subagent',
   description:
-    'Wait until the subagent stops running (or the timeout passes) and return its final answer. ' +
-    'Use this instead of polling `get_subagent` in a loop.',
+    'Park the turn until the subagent stops running and come back with its final answer. A finished ' +
+    'subagent answers at once; a running one ends the round instead of blocking it (the completion ' +
+    'notice wakes you), so `timeoutMs` only bounds how long you are willing to stay parked.',
   inputSchema: {
     type: 'object',
     properties: {
       id: { type: 'string' },
-      timeoutMs: { type: 'integer', minimum: 1000, maximum: 300000, default: 60000 },
+      timeoutMs: { type: 'integer', minimum: 1000, maximum: 600000, default: 600000 },
       include: {
         type: 'array',
         items: { type: 'string', enum: ['messages', 'last', 'changes'] }
@@ -490,16 +507,22 @@ export const waitSubagent = {  name: 'wait_subagent',
   },
   async call(args, context) {
     const include = Array.isArray(args?.include) ? args.include : []
-    const response = await callBridge(context, 'POST', `/subagents/${encodeURIComponent(args.id)}/wait`, {
-      timeoutMs: args?.timeoutMs ?? 60_000
-    })
-    const record = response.subagent
-    if (response.timedOut) {
-      return text(
-        `${statusLine(record)}\n仍在运行（已等 ${duration(args?.timeoutMs ?? 60_000)}），继续等或用 send_subagent_prompt 问进度。`
-      )
+    const timeoutMs = args?.timeoutMs ?? 600_000
+    // Ask for the record first: an already-finished subagent should not cost a park at all.
+    const current = await callBridge(context, 'GET', `/subagents/${encodeURIComponent(args.id)}`)
+    const running = current.subagent.status === 'starting' || current.subagent.status === 'streaming'
+    if (!running) return { ...text(renderSubagent(current.subagent, { include })), deferred: undefined }
+    const record = current.subagent
+    const parked = [
+      statusLine(record),
+      record.label ? `label: ${record.label}` : '',
+      `仍在运行：本回合到此结束，它结束时你会被唤醒（不必轮询，也不要紧接着再调 wait_subagent）。`,
+      `想现在看进度就调 get_subagent（id ${record.id}）。`
+    ].filter(Boolean).join('\n')
+    return {
+      ...text(parked),
+      deferred: { kind: 'subagent', keys: [record.id], label: `等待子代理 ${record.id}`, timeoutMs }
     }
-    return text(renderSubagent(record, { include }))
   }
 }
 
