@@ -13,6 +13,14 @@ import type { TranscriptStore, StoredTranscript } from '../transcript-store'
 import { loadMcpTools } from './mcp-client'
 import { readProjectConventions } from './project-conventions'
 import { orderToolResults } from './transcript-order'
+import {
+  fileOperations,
+  formatFileOperations,
+  mergeOperations,
+  stripFileOperations,
+  summaryBody,
+  summaryRequest
+} from './compaction-prompt'
 import { hasToolCallMarkup, repairToolCallText } from '../../shared/dsml-repair'
 import { toolGuidance } from './tool-guidance'
 import {
@@ -502,15 +510,27 @@ export class PropheyEngine implements AgentEngine {
   }
 
   /**
-   * Rewrite the context: the model summarizes the conversation, and the summary takes its place.
+   * Rewrite the context the model reads: a checkpoint summary takes the place of the conversation.
    *
-   * Same idea as pi's compaction — the request becomes "here is what happened" plus whatever came
-   * after, so the next turn starts with room to work instead of replaying everything. The transcript
-   * itself keeps every turn: the window still shows the conversation the user had (they asked for
-   * that), and only what the model receives is narrowed to the summary. A failed summary therefore
-   * costs nothing — the conversation is untouched until there is a summary worth storing.
+   * The transcript itself keeps every turn — the window still shows the conversation the user had
+   * (they asked for that), and only what the model receives is narrowed to the summary. A failed
+   * summary therefore costs nothing: nothing is stored until there is a summary worth storing.
+   * `compaction-prompt.ts` owns what the summary looks like (sections, merge rules, file lists).
    */
   async compact(instructions?: string): Promise<{ summary?: string }> {
+    return this.compactWith('manual', instructions)
+  }
+
+  /**
+   * The one implementation; `reason` only tells the window whether it was the threshold or `/compact`.
+   *
+   * A second pass merges into the newest summary instead of rewriting it from scratch: re-summarising
+   * a summary is how earlier facts quietly disappear.
+   */
+  private async compactWith(
+    reason: 'auto' | 'manual',
+    instructions?: string
+  ): Promise<{ summary?: string }> {
     this.controller ??= new AbortController()
     const signal = this.controller.signal
     const model = this.model ?? (await this.pickModel())
@@ -518,26 +538,46 @@ export class PropheyEngine implements AgentEngine {
     const context = this.contextMessages()
     if (context.length === 0) return {}
     const runtime = await providers.getRuntime()
+    // `contextMessages()` starts at the newest summary, so a leading summary means this is a second
+    // pass: fold the messages after it into it, and carry its file lists forward (rebuilt below).
+    const newest = context[0]?.compaction === true ? context[0] : undefined
+    const carried = newest
+      ? stripFileOperations(summaryBody(newest))
+      : { body: '', operations: { read: [], modified: [] } }
+    const conversation = newest ? context.slice(1) : context
+    const window = model.contextWindow ?? 0
+    const { systemPrompt, prompt } = summaryRequest({
+      conversation,
+      previousSummary: carried.body || undefined,
+      instructions,
+      // Half the window for the conversation: the summary itself needs room, and a request too big
+      // to summarise is exactly the request compaction exists for.
+      maxChars: window > 0 ? Math.floor(window * 2) : 120_000
+    })
+    // Paths are extracted, never remembered: the next turn reuses them verbatim.
+    const operations = mergeOperations(carried.operations, fileOperations(context))
+    // An explicit output budget: the Anthropic adapter otherwise sends `max_tokens: model.maxTokens`
+    // (64K on a 200K model), and a request whose prompt plus that ceiling exceeds the window is
+    // rejected outright. A checkpoint summary has no business being longer than this anyway.
+    const maxTokens = window > 0 ? Math.min(8192, Math.max(2048, Math.floor(window * 0.2))) : 4096
     this.setStatus({ compacting: true, activity: { label: '正在压缩上下文', since: Date.now() } })
-    this.options.onEvent({ type: 'compaction_start', reason: 'manual' })
+    this.options.onEvent({ type: 'compaction_start', reason })
     try {
       const answer = (await runtime.completeSimple(
         model,
         {
-          systemPrompt:
-            '你在压缩一段编码会话的上下文。输出一段中文摘要，保留：用户的目标、已做出的决定、' +
-            '改过/读过的文件与其作用、未完成的工作、以及继续工作需要的具体事实（路径、命令、' +
-            '错误信息）。不要寒暄，不要复述工具输出全文。' +
-            (instructions?.trim()
-              ? `
-
-用户额外要求：${instructions.trim()}`
-              : ''),
-          messages: orderToolResults(structuredClone(context)) as never
+          systemPrompt,
+          // The conversation goes in as a document, not as history: replaying it makes the model
+          // answer it (or keep talking) instead of summarising it.
+          messages: [
+            { role: 'user', content: [{ type: 'text', text: prompt }], timestamp: Date.now() }
+          ] as never
         },
-        { signal }
+        { signal, maxTokens }
       )) as unknown as Record<string, unknown>
-      const summary = summaryOf(answer, signal)
+      const body = summaryOf(answer, signal)
+      const files = formatFileOperations(operations)
+      const summary = files ? `${body}\n\n${files}` : body
       // The summary is an ordinary user message: the window paints it as one (and can edit it). It is
       // appended where the compaction happened, so everything before stays readable and everything
       // after keeps working — the request starts at the newest `compaction` marker, not at the top.
@@ -1066,7 +1106,7 @@ export class PropheyEngine implements AgentEngine {
         if (!autoCompactTried && this.shouldCompact()) {
           autoCompactTried = true
           try {
-            await this.compact()
+            await this.compactWith('auto')
           } catch (error) {
             // A summary that fails must not cost the turn. Nothing was rewritten (the summary is only
             // stored once it is worth storing), so the model answers with what the conversation
@@ -1545,6 +1585,9 @@ function summaryOf(answer: Record<string, unknown>, signal: AbortSignal): string
   }
   // Say what the provider said: an empty answer hid a 503 model_not_found once already.
   if (answer.stopReason === 'error' || answer.errorMessage) throw new Error(describeError(answer))
+  // A summary cut off at the token cap is a half-written checkpoint: it looks like a summary and
+  // would replace the conversation with a fragment.
+  if (answer.stopReason === 'length') throw new Error('压缩没有写完（达到输出上限），原对话保持不变')
   if (!text) throw new Error('压缩没有返回内容。模型可能只回了思考过程，换一个模型或重试一次')
   if (INTERRUPTED_SUMMARY.test(text)) {
     throw new Error(`压缩被中断（模型只回了「${text}」），原对话保持不变`)

@@ -46,7 +46,7 @@ async function harness(t, respond) {
       event({ type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } })
       event({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: answer.text ?? '' } })
       event({ type: 'content_block_stop', index: 1 })
-      event({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } })
+      event({ type: 'message_delta', delta: { stop_reason: answer.stop ?? 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } })
       event({ type: 'message_stop' })
       res.end()
     })
@@ -185,6 +185,59 @@ test('compaction: the abort sentinel is not a summary', async (t) => {
 })
 
 /**
+ * What the summary request actually is, end to end.
+ *
+ * The shape matters as much as the words: the model must receive a document (one user message) and
+ * the file lists must be extracted from the tool calls, because a model paraphrasing paths is how
+ * the turns after a compaction go wrong.
+ */
+test('compaction: the request is a document, and the file lists are extracted not remembered', async (t) => {
+  const { engine, compactRequests } = await harness(t, ({ body }) =>
+    COMPACTING(body) ? { text: '## 目标\n修好登录\n\n## 当前请求\n修好登录' } : { text: '好的，我来改。' })
+
+  await engine.prompt('帮我改一下登录界面的错误提示')
+  // A turn that read and changed files, the way a real session looks.
+  engine.transcript.push(
+    {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', id: 'r1', name: 'read_file', arguments: { path: 'src/auth.ts' } },
+        { type: 'toolCall', id: 'w1', name: 'edit_file', arguments: { path: 'src/auth.ts' } },
+        { type: 'toolCall', id: 'w2', name: 'codegraph__write_file', arguments: { path: 'src/api.ts' } }
+      ],
+      stopReason: 'toolUse',
+      timestamp: Date.now()
+    },
+    {
+      role: 'toolResult',
+      toolCallId: 'r1',
+      toolName: 'read_file',
+      content: [{ type: 'text', text: 'LOG_LINE '.repeat(2000) }],
+      isError: false,
+      timestamp: Date.now()
+    }
+  )
+
+  const result = await engine.compact()
+  const request = compactRequests().at(-1).body
+  assert.equal(request.messages.length, 1, 'the conversation is a document, not replayed history')
+  assert.equal(request.messages[0].role, 'user')
+  const prompt = request.messages[0].content[0].text
+  assert.match(prompt, /<conversation>/, 'the document is tagged so the model does not answer it')
+  assert.match(prompt, /### 助手/, 'roles are labelled in the document')
+  assert.match(prompt, /→ read_file/, 'tool calls appear by name')
+  // 32000-token window → 20% output budget; without it the adapter sends model.maxTokens.
+  assert.equal(request.max_tokens, 6400, 'an explicit output budget is declared')
+  const document = prompt.slice(prompt.indexOf('<conversation>'), prompt.indexOf('</conversation>'))
+  assert.ok(document.length < 6000, `a huge tool result is clipped (${document.length} chars)`)
+  assert.match(document, /此处省略 \d+ 字符/)
+
+  // The stored summary carries the file lists, and they came from the calls, not from the model.
+  assert.match(result.summary, /<read-files>\n- src\/auth\.ts\n<\/read-files>/)
+  assert.match(result.summary, /<modified-files>\n- src\/auth\.ts\n- src\/api\.ts\n<\/modified-files>/)
+})
+
+/**
  * A gateway that does not translate the model's tool-call markup leaves it in the reply text. The
  * fix has to be visible at both ends: the call really runs, and the markup never reaches the
  * transcript or the window.
@@ -223,4 +276,61 @@ test('tool calls written as text: the call runs and the markup stays out of the 
   assert.doesNotMatch(JSON.stringify(messages), /DSML/, 'no markup in the transcript')
   assert.ok(events.some((event) => event.type === 'tool_calls_repaired' && event.count === 1))
   assert.ok(events.some((event) => event.type === 'tool_execution_start' && event.toolName === 'run_bash'))
+})
+
+test('compaction: a summary cut off at the token cap is not a summary', async (t) => {
+  // `stop_reason: max_tokens` comes back with plausible-looking text; storing it would replace the
+  // conversation with a fragment that reads like a checkpoint.
+  const { engine, events } = await harness(t, ({ body }) =>
+    COMPACTING(body)
+      ? { text: '## 目标\n修好登录\n\n## 进展\n- [x', stop: 'max_tokens' }
+      : { text: '好的，我来改。' })
+
+  await engine.prompt('帮我改一下登录界面的错误提示')
+  const before = await engine.messages()
+  await assert.rejects(() => engine.compact(), /没有写完|输出上限/, 'an incomplete summary is refused')
+  assert.deepEqual(await engine.messages(), before, 'the conversation is untouched')
+  assert.equal(events.some((event) => event.type === 'compaction_end'), false)
+})
+
+/**
+ * A second compaction merges into the newest summary.
+ *
+ * Rewriting a summary from scratch erases earlier facts — that is what makes a long session go
+ * soft after the third compaction. The old body goes back in as `<previous-summary>` (not as raw
+ * history), and the file lists are rebuilt rather than left for the model to re-guess.
+ */
+test('compaction: a second pass merges into the previous summary and keeps its file lists', async (t) => {
+  let reply = '## 目标\n修好登录\n\n## 进展\n- [ ] 改 src/auth.ts'
+  const { engine, compactRequests } = await harness(t, ({ body }) =>
+    COMPACTING(body) ? { text: reply } : { text: '好的，我来改。' })
+
+  await engine.prompt('帮我改一下登录界面的错误提示')
+  engine.transcript.push({
+    role: 'assistant',
+    content: [{ type: 'toolCall', id: 'e1', name: 'edit_file', arguments: { path: 'src/auth.ts' } }],
+    stopReason: 'toolUse',
+    timestamp: Date.now()
+  })
+  await engine.compact()
+
+  reply = '## 目标\n修好登录\n\n## 进展\n- [x] 改 src/auth.ts'
+  await engine.prompt('继续补测试')
+  engine.transcript.push({
+    role: 'assistant',
+    content: [{ type: 'toolCall', id: 'e2', name: 'write_file', arguments: { path: 'tests/login.test.ts' } }],
+    stopReason: 'toolUse',
+    timestamp: Date.now()
+  })
+  await engine.compact()
+
+  const second = compactRequests().at(-1).body.messages[0].content[0].text
+  assert.match(second, /<previous-summary>\n## 目标\n修好登录/, 'the earlier summary is carried in')
+  assert.match(second, /只增不减/, 'and the merge rules are spelled out')
+  assert.doesNotMatch(second, /帮我改一下登录界面的错误提示/, 'the turns it already covered are not replayed')
+  assert.doesNotMatch(second, /<read-files>|<modified-files>/, 'the file lists are not handed back to the model')
+
+  const stored = (await engine.messages()).at(-1)
+  assert.match(stored.content, /- src\/auth\.ts/, 'the earlier file survives the second pass')
+  assert.match(stored.content, /- tests\/login\.test\.ts/, 'and the new one is added')
 })
